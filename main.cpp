@@ -124,10 +124,18 @@ struct Project {
         if (!vars.contains("sta_prep"))  // sta/ next to build/
             vars["sta_prep"] = QDir(QCoreApplication::applicationDirPath() + "/../sta").absoluteFilePath("nextpnr_sta.py");
         vars["xdc"] = xdc;
-        vars["sources"] = sources.join(' ');
-        QStringList inc, def, bb;
-        for (const QString& i : incdirs) inc << "-I" + i;
-        for (const QString& d : defines) def << "+define+" + d;
+        // commands run through bash: quote anything the shell would read (32'h... in a define)
+        auto q = [](const QString& w) {
+            static const QRegularExpression plain("^[A-Za-z0-9_./+=:,@%-]+$");
+            if (plain.match(w).hasMatch()) return w;
+            QString e = w;
+            return "'" + e.replace("'", "'\\''") + "'";
+        };
+        QStringList src, inc, def, bb;
+        for (const QString& f : sources) src << q(f);
+        vars["sources"] = src.join(' ');
+        for (const QString& i : incdirs) inc << q("-I" + i);
+        for (const QString& d : defines) def << q("+define+" + d);
         for (const QString& b : blackboxes) bb << "--struct-only-blackbox " + b;
         vars["incdirs"] = inc.join(' ');
         vars["defines"] = def.join(' ');
