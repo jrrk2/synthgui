@@ -1,0 +1,48 @@
+{
+  "name": "vc707 bramtest",
+  "top": "vc707_bramtest",
+  "work": "~/bytecode-work/synthgui-bramtest",
+  "device": "xc7vx485t",
+  "part": "xc7vx485tffg1761-2",
+  "xdc": "~/bytecode/fpga/bramtest/vc707_bramtest_open.xdc",
+  "srcdir": "~/bytecode/fpga/bramtest",
+  "sources": [
+    "~/bytecode/fpga/bramtest/bramtest.v",
+    "~/bytecode/fpga/bramtest/vc707_bramtest.v",
+    "~/bytecode/fpga/eth-rtl/simpleuart.v",
+    "~/bytecode/fpga/eth-rtl/clkgen_vc707.sv"
+  ],
+  "incdirs": ["~/bytecode/fpga/bramtest"],
+  "defines": ["SYNTHESIS"],
+  "blackboxes": ["BUFG", "IBUFDS", "MMCME2_ADV", "IBUF", "OBUF", "RAMB36E1"],
+
+  "verilator_root": "~/verilator",
+  "xilinx_stubs": "~/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v ~/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
+  "nextpnr": "~/bytecode-work/pinned/build/nextpnr-himbaechel",
+  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60",
+  "prjxray_db": "~/bytecode-work/pinned/prjxray-db",
+  "python": "~/xc7-bitstream-tools/.venv/bin/python",
+  "convert": "~/xc7-bitstream-tools/scripts/convert.py",
+  "yosys": "~/xc7-bitstream-tools/yosys/yosys",
+  "fasm2netlist": "~/xc7-bitstream-tools/fasm2netlist/build/fasm2netlist",
+  "lvs_equiv": "~/xc7-bitstream-tools/fasm2netlist/build/lvs_equiv",
+  "sta": "~/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/sta",
+  "openfpgaloader": "~/openFPGALoader/build/openFPGALoader",
+
+  "steps": [
+    {"id": "synth", "label": "Synthesize",
+     "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator_root}/bin/verilator -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"},
+    {"id": "pnr", "label": "Place & Route",
+     "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"},
+    {"id": "sta", "label": "OpenSTA",
+     "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"},
+    {"id": "lvs", "label": "LVS",
+     "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {yosys} -q -p 'read_json {json}; write_verilog -noattr {work}/{top}_mapped.v' && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"},
+    {"id": "bit", "label": "Bitstream",
+     "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"},
+    {"id": "program", "label": "Program",
+     "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"}
+  ],
+
+  "capacity": {"LUT": 303600, "FF": 607200, "RAMB36": 1030, "LUTRAM": 130800, "DSP": 2800, "IO": 700, "BUFG": 32}
+}

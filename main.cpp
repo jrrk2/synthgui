@@ -111,6 +111,10 @@ struct Project {
         vars["fasm"] = work + "/" + top + ".fasm";
         vars["placement"] = work + "/" + top + "_placement.json";
         vars["bit"] = work + "/" + top + ".bit";
+        vars["routed"] = work + "/" + top + "_routed.json";
+        vars["sdf"] = work + "/" + top + ".sdf";
+        if (!vars.contains("sta_prep"))  // sta/ next to build/
+            vars["sta_prep"] = QDir(QCoreApplication::applicationDirPath() + "/../sta").absoluteFilePath("nextpnr_sta.py");
         vars["xdc"] = xdc;
         vars["sources"] = sources.join(' ');
         QStringList inc, def, bb;
@@ -254,6 +258,11 @@ public:
             l->setZValue(3);
             m_pathItems << l;
         }
+    }
+    bool gridPos(const QString& cell, QPointF& g) const {
+        if (!m_pos.contains(cell)) return false;
+        g = m_pos[cell] / 3.0;
+        return true;
     }
     void focus(const QString& cell, const QPointF& fallback) {
         if (m_mark) { m_scene.removeItem(m_mark); delete m_mark; m_mark = nullptr; }
@@ -651,6 +660,36 @@ private:
         }
         m_worstClock = failing.isEmpty() ? target : *failing.begin();
         parsePaths(pnr);
+        // OpenSTA on nextpnr's SDF: "clk_sys period_min = 9.79 fmax = 102.17" per clock,
+        // targets from the create_clock lines the prep script wrote
+        const QString sta = readAll(m_p.logPath("sta"));
+        if (!sta.isEmpty()) {
+            QMap<QString, double> period;
+            static const QRegularExpression cc("create_clock -name (\\S+) -period ([\\d.]+)");
+            auto ci = cc.globalMatch(readAll(m_p.vars["work"] + "/sta/sta.tcl"));
+            while (ci.hasNext()) { const auto m = ci.next(); period[m.captured(1)] = m.captured(2).toDouble(); }
+            static const QRegularExpression pm("^(\\S+) period_min = ([\\d.]+) fmax = ([\\d.]+)", QRegularExpression::MultilineOption);
+            auto pi = pm.globalMatch(sta);
+            while (pi.hasNext()) {
+                const auto m = pi.next();
+                const double tgt = period.value(m.captured(1)) > 0 ? 1000.0 / period.value(m.captured(1)) : 0;
+                const bool fail = tgt > 0 && m.captured(3).toDouble() < tgt;
+                const int r = m_timing->rowCount();
+                m_timing->insertRow(r);
+                m_timing->setItem(r, 0, new QTableWidgetItem(m.captured(1) + " (OpenSTA)"));
+                m_timing->setItem(r, 1, new QTableWidgetItem(m.captured(3)));
+                m_timing->setItem(r, 2, new QTableWidgetItem(tgt > 0 ? QString::number(tgt, 'f', 2) : "-"));
+                auto* st = new QTableWidgetItem(fail ? "FAIL" : "PASS");
+                st->setForeground(fail ? QColor(0xc0, 0x20, 0x20) : QColor(0x20, 0x80, 0x20));
+                QFont f = st->font();
+                f.setBold(true);
+                st->setFont(f);
+                m_timing->setItem(r, 3, st);
+            }
+            m_timing->resizeColumnsToContents();
+            parseStaPaths(sta);
+        }
+        fillPathClocks();
         QSet<QString> hot;
         static const QRegularExpression rep("Critical path report for clock '([^']+)'");
         static const QRegularExpression cellRef("(?:Source|Sink)\\s+([^\\s]+)\\.[A-Za-z0-9_\\[\\]]+\\s*$");
@@ -703,14 +742,41 @@ private:
             if (ln.startsWith("Info: Max frequency") || ln.trimmed() == "Info:") flush(), cur.clear();
         }
         flush();
+    }
+    void fillPathClocks() {
         const QString keep = m_pathClock->currentText();
         m_pathClock->blockSignals(true);
         m_pathClock->clear();
         for (auto it = m_paths.begin(); it != m_paths.end(); ++it) m_pathClock->addItem(it.key());
         m_pathClock->blockSignals(false);
-        const QString want = m_paths.contains(keep) ? keep : m_worstClock;
+        QString want = m_paths.contains(keep) ? keep : m_worstClock;
+        if (!m_paths.contains(keep))  // OpenSTA sees every path through nextpnr's SDF: prefer it
+            for (auto it = m_paths.begin(); it != m_paths.end(); ++it)
+                if (it.key().endsWith("(OpenSTA)")) { want = it.key(); break; }
         if (!want.isEmpty()) m_pathClock->setCurrentText(want);
         showPath(m_pathClock->currentText());
+    }
+    // the first max path of each group in OpenSTA's full report, up to its data arrival:
+    // "    103    0.303    1.065 ^ rstcnt_15/Q (SLICE_FFX)"
+    void parseStaPaths(const QString& log) {
+        static const QRegularExpression grp("^Path Group: (\\S+)");
+        static const QRegularExpression row("^\\s*(\\d+)?\\s+(-?[\\d.]+)\\s+(-?[\\d.]+) ([\\^v]) (\\S+)/(\\S+) \\((\\S+)\\)");
+        QString cur;
+        bool max = false, inData = false;
+        QList<PathRow> rows;
+        for (const QString& ln : log.split('\n')) {
+            const auto g = grp.match(ln);
+            if (g.hasMatch()) { cur = g.captured(1) + " (OpenSTA)"; rows.clear(); inData = true; max = false; continue; }
+            if (ln.startsWith("Path Type: max")) { max = true; continue; }
+            if (!inData || !max || cur.isEmpty() || m_paths.contains(cur)) continue;
+            if (ln.contains("data arrival time")) { m_paths[cur] = rows; inData = false; continue; }
+            const auto m = row.match(ln);
+            if (!m.hasMatch()) continue;
+            const QString inst = m.captured(5), pin = m.captured(6), type = m.captured(7);
+            QString kind = type.startsWith("BUFG") ? "clock" : rows.isEmpty() || rows.last().cell != inst ? "arrive" : "cell";
+            if (!rows.isEmpty() && rows.last().cell == inst) rows.last().type = "arrive";
+            rows << PathRow{kind, m.captured(2), m.captured(3), inst + "/" + pin + "  (" + type.section("__", 0, 0) + ")", inst, {}, {}, false};
+        }
     }
     void showPath(const QString& clock) {
         m_path->setRowCount(0);
@@ -728,6 +794,17 @@ private:
             m_path->setItem(i, 4, new QTableWidgetItem(r.hop ? QString("(%1,%2) -> (%3,%4)").arg(r.from.x()).arg(r.from.y()).arg(r.to.x()).arg(r.to.y()) : QString()));
             if (r.type == "routing") for (int c = 0; c < 5; ++c) m_path->item(i, c)->setForeground(QColor(0x60, 0x60, 0x90));
             if (r.hop) hops << qMakePair(r.from, r.to);
+        }
+        if (hops.isEmpty()) {  // OpenSTA paths: join the placed cells in order
+            QPointF last; bool have = false; QString lastCell;
+            for (const PathRow& r : m_paths.value(clock)) {
+                if (r.cell.isEmpty() || r.cell == lastCell) continue;
+                lastCell = r.cell;
+                QPointF g;
+                if (!m_chip->gridPos(r.cell, g)) continue;
+                if (have) hops << qMakePair(last, g);
+                last = g; have = true;
+            }
         }
         m_path->resizeColumnsToContents();
         m_chip->drawPath(hops);

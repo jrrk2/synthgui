@@ -38,3 +38,22 @@ Next stages (not done): OpenSTA as a step (`virtex7.lib` from Vivado's SDK
 for the arcs, nextpnr's `--sdf` for the delays); the LVS mismatches and
 nextpnr's per-net timing as highlights on the plot; then the tools as shared
 libraries in one process sharing one netlist and one chip database.
+
+## OpenSTA step
+
+Place & Route also writes the routed design (`--write`) and an SDF (`--sdf`).
+The OpenSTA step runs `sta/nextpnr_sta.py`, which turns those into a flat Verilog
+netlist, a Liberty file and a Tcl script, then runs OpenSTA's `sta` on them.
+
+nextpnr's SDF uses its own physical cell types (SLICE_LUTX, SLICE_FFX,
+RAMB36E1_RAMB36E1, ...), which no vendor Liberty describes, so the Liberty is
+derived from the SDF. Each IOPATH becomes an arc and each SETUPHOLD a check.
+Instances with different arc sets get separate cell variants, so a LUT never
+gains false arcs from unused inputs. Clocks default to every loaded BUFGCTRL
+output at the slowest target in the nextpnr log; `--clock PIN=NS` overrides.
+
+The Timing tab adds an "(OpenSTA)" row per clock, and the Critical path tab
+shows OpenSTA's worst path, drawn on the chip plot between the placed cells.
+On bramtest, OpenSTA agrees with nextpnr on nextpnr's own worst path to within
+about 7%, but it finds a deeper path (an incrementer after the UART divider
+compare) that nextpnr's report does not show.

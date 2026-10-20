@@ -1,0 +1,118 @@
+{
+  "name": "vc707 ethmin (netboot loader)",
+  "top": "vc707_ethmin_vm",
+  "work": "~/bytecode-work/synthgui-ethmin50",
+  "device": "xc7vx485t",
+  "part": "xc7vx485tffg1761-2",
+  "xdc": "~/bytecode/fpga/vc707-ethmin/vc707_ethmin_vm_open.xdc",
+  "srcdir": "~/bytecode/fpga/vc707-ethmin",
+  "sources": [
+    "~/bytecode/ocaml4142_vm_rtl.sv",
+    "~/bytecode/fpga/vc707-ethmin/program_bram.v",
+    "~/bytecode/fpga/vc707-ethmin/data_bram.v",
+    "~/bytecode/fpga/vc707-ethmin/vm_trace.v",
+    "~/bytecode/fpga/vc707-ethmin/tdp_ram32.v",
+    "~/bytecode/fpga/vc707-ethmin/ethmin_vm_core.v",
+    "~/bytecode/fpga/vc707-ethmin/vc707_ethmin_vm.v",
+    "~/bytecode/fpga/vc707-ethmin/sd_wrap.v",
+    "~/bytecode/fpga/sd-lowrisc/sd_top.sv",
+    "~/bytecode/fpga/sd-lowrisc/sd_data_serial_host.sv",
+    "~/bytecode/fpga/sd-lowrisc/sd_cmd_serial_host.v",
+    "~/bytecode/fpga/sd-lowrisc/sd_crc_7.v",
+    "~/bytecode/fpga/sd-lowrisc/sd_crc_16.v",
+    "~/bytecode/fpga/sd-lowrisc/sd_clock_divider.v",
+    "~/bytecode/fpga/fpu-rtl/fpu_hardfloat.v",
+    "~/bytecode/fpga/fpu-rtl/recode64.v",
+    "~/bytecode/fpga/fpu-rtl/hardfloat.v",
+    "~/bytecode/fpga/eth-rtl/simpleuart.v",
+    "~/bytecode/fpga/eth-rtl/liteeth_sgmii_phy.v",
+    "~/bytecode/fpga/eth-rtl/eth_mac_1g.sv",
+    "~/bytecode/fpga/eth-rtl/axis_gmii_rx.sv",
+    "~/bytecode/fpga/eth-rtl/axis_gmii_tx.sv",
+    "~/bytecode/fpga/eth-rtl/rgmii_lfsr.sv",
+    "~/bytecode/fpga/eth-rtl/eth_lutram_fifo.sv",
+    "~/bytecode/fpga/eth-rtl/eth_stream_dma.sv",
+    "~/bytecode/fpga/eth-rtl/eth_gmii_retime256.sv",
+    "~/bytecode/fpga/eth-rtl/eth_pkt_buf256.sv",
+    "~/bytecode/fpga/eth-rtl/sgmii_soc_liteeth.sv",
+    "~/bytecode/fpga/eth-rtl/clkgen_vc707.sv"
+  ],
+  "incdirs": [
+    "~/bytecode",
+    "~/bytecode/rtl_instructions",
+    "~/bytecode/fpga/vc707-ethmin",
+    "~/bytecode/fpga/sd-lowrisc"
+  ],
+  "defines": [
+    "SYNTHESIS",
+    "SYS_DIV=20.000",
+    "CLK_HZ=50000000",
+    "BUILD_ID=32'h229b9379"
+  ],
+  "blackboxes": [
+    "BUFG",
+    "FDCE",
+    "GTXE2_CHANNEL",
+    "IBUFDS",
+    "IBUFDS_GTE2",
+    "IOBUF",
+    "OBUFT",
+    "MMCME2_ADV",
+    "RAMB36E1",
+    "IBUF",
+    "OBUF"
+  ],
+  "verilator_root": "~/verilator",
+  "xilinx_stubs": "~/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v ~/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
+  "nextpnr": "~/bytecode-work/pinned/build/nextpnr-himbaechel",
+  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60 --placer-heap-congestion-spread",
+  "prjxray_db": "~/bytecode-work/pinned/prjxray-db",
+  "python": "~/xc7-bitstream-tools/.venv/bin/python",
+  "convert": "~/xc7-bitstream-tools/scripts/convert.py",
+  "yosys": "~/xc7-bitstream-tools/yosys/yosys",
+  "fasm2netlist": "~/xc7-bitstream-tools/fasm2netlist/build/fasm2netlist",
+  "lvs_equiv": "~/xc7-bitstream-tools/fasm2netlist/build/lvs_equiv",
+  "sta": "~/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/sta",
+  "openfpgaloader": "~/openFPGALoader/build/openFPGALoader",
+  "steps": [
+    {
+      "id": "synth",
+      "label": "Synthesize",
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator_root}/bin/verilator -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+    },
+    {
+      "id": "pnr",
+      "label": "Place & Route",
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"
+    },
+    {
+      "id": "sta",
+      "label": "OpenSTA",
+      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"
+    },
+    {
+      "id": "lvs",
+      "label": "LVS",
+      "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {yosys} -q -p 'read_json {json}; write_verilog -noattr {work}/{top}_mapped.v' && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"
+    },
+    {
+      "id": "bit",
+      "label": "Bitstream",
+      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"
+    },
+    {
+      "id": "program",
+      "label": "Program",
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    }
+  ],
+  "capacity": {
+    "LUT": 303600,
+    "FF": 607200,
+    "RAMB36": 1030,
+    "LUTRAM": 130800,
+    "DSP": 2800,
+    "IO": 700,
+    "BUFG": 32
+  }
+}
