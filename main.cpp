@@ -31,6 +31,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QListWidget>
+#include <QComboBox>
 #include <QMainWindow>
 #include <QMap>
 #include <QMessageBox>
@@ -182,13 +183,16 @@ public:
     // placement: cell -> {nextpnr_bel "X..Y../...", type}; hot: cells on failing paths
     int load(const QString& placementFile, const QSet<QString>& hot, QString& summary) {
         m_scene.clear();
+        m_pathItems.clear();
+        m_mark = nullptr;
+        m_pos.clear();
         QFile f(placementFile);
         if (!f.open(QIODevice::ReadOnly)) { summary = "no placement yet (" + placementFile + ")"; return 0; }
         const QJsonObject cells = QJsonDocument::fromJson(f.readAll()).object();
         static const QRegularExpression xy("^X(\\d+)Y(\\d+)/");
         QMap<QString, int> counts;
         int maxX = 0, maxY = 0, n = 0;
-        struct P { int x, y; QString kind; bool hot; };
+        struct P { int x, y; QString kind; bool hot; QString tip; };
         QList<P> pts;
         for (auto it = cells.begin(); it != cells.end(); ++it) {
             const QJsonObject c = it.value().toObject();
@@ -199,7 +203,9 @@ public:
             const int x = m.captured(1).toInt(), y = m.captured(2).toInt();
             maxX = std::max(maxX, x);
             maxY = std::max(maxY, y);
-            pts << P{x, y, kind, hot.contains(it.key())};
+            pts << P{x, y, kind, hot.contains(it.key()),
+                     QString("%1\n%2  %3\n%4").arg(it.key(), c.value("type").toString(), c.value("site").toString(), c.value("tile").toString())};
+            m_pos[it.key()] = QPointF(x * 3.0, y * 3.0);
             counts[kind]++;
             ++n;
         }
@@ -208,15 +214,19 @@ public:
         for (const P& p : pts) {
             if (p.hot) continue;
             const QColor col = colour(p.kind);
+            QGraphicsRectItem* r;
             if (p.kind == "BRAM" || p.kind == "DSP")  // a RAMB36 / DSP48 pair spans five tile rows
-                m_scene.addRect(p.x * s - s, p.y * s, s * 2.6, s * 4.6, QPen(col.darker(140)), col);
+                r = m_scene.addRect(p.x * s - s, p.y * s, s * 2.6, s * 4.6, QPen(col.darker(140)), col);
             else
-                m_scene.addRect(p.x * s, p.y * s, s * 0.9, s * 0.9, Qt::NoPen, col);
+                r = m_scene.addRect(p.x * s, p.y * s, s * 0.9, s * 0.9, Qt::NoPen, col);
+            r->setToolTip(p.tip);
         }
         int nhot = 0;
         for (const P& p : pts) {  // failing-path cells on top, large
             if (!p.hot) continue;
-            m_scene.addEllipse(p.x * s - 3, p.y * s - 3, 9, 9, QPen(QColor(255, 255, 255), 1), QColor(0xff, 0x30, 0x30));
+            auto* e = m_scene.addEllipse(p.x * s - 3, p.y * s - 3, 9, 9, QPen(QColor(255, 255, 255), 1), QColor(0xff, 0x30, 0x30));
+            e->setToolTip(p.tip);
+            e->setZValue(2);
             ++nhot;
         }
         // legend (a label beside the view, so it keeps its size when zoomed)
@@ -233,6 +243,28 @@ public:
         return n;
     }
     void fit() { fitInView(sceneRect(), Qt::KeepAspectRatio); }
+    // the critical path as a polyline through its nets' (x,y) -> (x,y) hops
+    void drawPath(const QList<QPair<QPointF, QPointF>>& hops) {
+        for (auto* it : m_pathItems) { m_scene.removeItem(it); delete it; }
+        m_pathItems.clear();
+        QPen pen(QColor(0xff, 0xe0, 0x40), 1.6);
+        pen.setCosmetic(true);
+        for (const auto& h : hops) {
+            auto* l = m_scene.addLine(QLineF(h.first * 3.0, h.second * 3.0), pen);
+            l->setZValue(3);
+            m_pathItems << l;
+        }
+    }
+    void focus(const QString& cell, const QPointF& fallback) {
+        if (m_mark) { m_scene.removeItem(m_mark); delete m_mark; m_mark = nullptr; }
+        const QPointF c = m_pos.contains(cell) ? m_pos[cell] : fallback * 3.0;
+        QPen pen(QColor(0x40, 0xff, 0xff), 2);
+        pen.setCosmetic(true);
+        m_mark = m_scene.addEllipse(c.x() - 8, c.y() - 8, 18, 18, pen, Qt::NoBrush);
+        m_mark->setZValue(4);
+        if (transform().m11() < 2.0) { resetTransform(); scale(4, 4); }
+        centerOn(c);
+    }
     QString legendHtml() const { return m_legendHtml; }
 
 protected:
@@ -266,6 +298,9 @@ private:
     }
     QGraphicsScene m_scene;
     QString m_legendHtml;
+    QMap<QString, QPointF> m_pos;  // cell -> scene position
+    QList<QGraphicsItem*> m_pathItems;
+    QGraphicsEllipseItem* m_mark = nullptr;
 };
 
 // ---------------------------------------------------------------- main window
@@ -312,6 +347,23 @@ public:
         chipPanel->addWidget(m_chip);
         chipPanel->addWidget(m_legend);
         chipPanel->setStretchFactor(0, 1);
+        m_pathClock = new QComboBox;
+        m_path = new QTableWidget(0, 5);
+        m_path->setHorizontalHeaderLabels({"Type", "Delay (ns)", "Total (ns)", "Cell / net", "From -> to"});
+        m_path->horizontalHeader()->setStretchLastSection(true);
+        m_path->setSelectionBehavior(QAbstractItemView::SelectRows);
+        auto* pathPanel = new QWidget;
+        auto* pl = new QVBoxLayout(pathPanel);
+        pl->setContentsMargins(0, 0, 0, 0);
+        pl->addWidget(m_pathClock);
+        pl->addWidget(m_path);
+        connect(m_pathClock, &QComboBox::currentTextChanged, this, [this](const QString& c) { showPath(c); });
+        connect(m_path, &QTableWidget::cellDoubleClicked, this, [this](int r, int) {
+            const QString cell = m_path->item(r, 0)->data(Qt::UserRole).toString();
+            const QPointF at = m_path->item(r, 0)->data(Qt::UserRole + 1).toPointF();
+            m_results->setCurrentWidget(m_chipPanel);
+            m_chip->focus(cell, at);
+        });
         m_problems = new QListWidget;
         connect(m_problems, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
             const QString f = it->data(Qt::UserRole).toString();
@@ -327,6 +379,8 @@ public:
         m_results->addTab(m_area, "Area");
         m_results->addTab(m_timing, "Timing");
         m_results->addTab(chipPanel, "Chip");
+        m_results->addTab(pathPanel, "Critical path");
+        m_pathPanel = pathPanel;
         m_chipPanel = chipPanel;
         m_results->addTab(m_problems, "Problems");
 
@@ -354,6 +408,21 @@ public:
         tb->addAction("Reload results", this, [this] { refreshAll(); });
 
         if (!m_p.sources.isEmpty()) openFile(m_p.sources.last(), 0);
+        // the last run of each step, from <work>/<step>.status (exit code, seconds) or just its log
+        for (const Step& s : m_p.steps) {
+            QFile st(m_p.work + "/" + s.id + ".status");
+            const QFileInfo lf(m_p.logPath(s.id));
+            QLabel* l = m_stepStatus[s.id];
+            if (st.open(QIODevice::ReadOnly)) {
+                const QStringList f = QString::fromUtf8(st.readAll()).split(' ');
+                const bool ok = f.value(0).trimmed() == "0";
+                l->setText(QString(" %1: %2 (%3 s, %4) ").arg(s.label, ok ? "ok" : "FAILED", f.value(1).trimmed(), lf.lastModified().toString("dd MMM hh:mm")));
+                l->setStyleSheet(ok ? "color: #208020" : "color: #c02020");
+            } else if (lf.exists()) {
+                l->setText(QString(" %1: log of %2 ").arg(s.label, lf.lastModified().toString("dd MMM hh:mm")));
+                l->setStyleSheet("color: #606060");
+            }
+        }
         refreshAll();
     }
 
@@ -363,6 +432,7 @@ public:
         if (name == "timing") { m_results->setCurrentWidget(m_timing); return this; }
         if (name == "log") { m_results->setCurrentWidget(m_log); return this; }
         if (name == "problems") { m_results->setCurrentWidget(m_problems); return this; }
+        if (name == "path") { m_results->setCurrentWidget(m_pathPanel); return this; }
         m_results->setCurrentWidget(m_chipPanel);
         return this;
     }
@@ -462,6 +532,8 @@ private:
             QLabel* l = m_stepStatus[m_cur.id];
             l->setText(QString(" %1: %2 (%3 s) ").arg(m_cur.label, code ? "FAILED" : "ok").arg(secs, 0, 'f', 0));
             l->setStyleSheet(code ? "color: #c02020" : "color: #208020");
+            QFile st(m_p.work + "/" + m_cur.id + ".status");
+            if (st.open(QIODevice::WriteOnly)) st.write(QString("%1 %2\n").arg(code).arg(secs, 0, 'f', 0).toUtf8());
             m_proc->deleteLater();
             m_proc = nullptr;
             refreshAll();
@@ -491,6 +563,7 @@ private:
         QString summary;
         m_chip->load(m_p.vars["placement"], hot, summary);
         m_legend->setText(m_chip->legendHtml());
+        showPath(m_pathClock->currentText());  // the overlay goes on the freshly loaded plot
         m_results->setTabText(m_results->indexOf(m_chipPanel), "Chip (" + summary.section(',', 0, 0) + ")");
         refreshProblems();
     }
@@ -576,6 +649,8 @@ private:
             const double slackRatio = c.value()[0].toDouble() / std::max(1.0, c.value()[1].toDouble());
             if (slackRatio < worst) { worst = slackRatio; target = c.key(); }
         }
+        m_worstClock = failing.isEmpty() ? target : *failing.begin();
+        parsePaths(pnr);
         QSet<QString> hot;
         static const QRegularExpression rep("Critical path report for clock '([^']+)'");
         static const QRegularExpression cellRef("(?:Source|Sink)\\s+([^\\s]+)\\.[A-Za-z0-9_\\[\\]]+\\s*$");
@@ -590,6 +665,73 @@ private:
             if (c.hasMatch()) hot.insert(c.captured(1));
         }
         return hot;
+    }
+    // "Info:   clk-to-q  0.30  0.30 Source uart_send_divcnt_0.Q"
+    // "Info:    routing  0.39  0.70 Net uart.send_divcnt[0] (45,199) -> (48,197)"
+    // "Info:                          Sink lut_new_n5310_1168.A6"
+    void parsePaths(const QString& log) {
+        m_paths.clear();
+        static const QRegularExpression rep("Critical path report for clock '([^']+)'");
+        static const QRegularExpression row("^Info:\\s+(\\S+)\\s+([\\d.]+)\\s+([\\d.]+)\\s+(Source|Net)\\s+(\\S+)(?:\\s+\\((\\d+),(\\d+)\\)\\s+->\\s+\\((\\d+),(\\d+)\\))?");
+        static const QRegularExpression sink("^Info:\\s+Sink\\s+(\\S+)");
+        QString cur;
+        QList<PathRow> rows;
+        auto flush = [&] { if (!cur.isEmpty() && !rows.isEmpty()) m_paths[cur] = rows; rows.clear(); };
+        for (const QString& ln : log.split('\n')) {
+            const auto r = rep.match(ln);
+            if (r.hasMatch()) { flush(); cur = r.captured(1); continue; }
+            if (cur.isEmpty()) continue;
+            const auto m = row.match(ln);
+            if (m.hasMatch()) {
+                PathRow pr{m.captured(1), m.captured(2), m.captured(3), m.captured(5), QString(), {}, {}, false};
+                if (m.captured(4) == "Source") pr.cell = pr.name.section('.', 0, -2);
+                if (!m.captured(6).isEmpty()) {
+                    pr.from = QPointF(m.captured(6).toInt(), m.captured(7).toInt());
+                    pr.to = QPointF(m.captured(8).toInt(), m.captured(9).toInt());
+                    pr.hop = true;
+                }
+                rows << pr;
+                continue;
+            }
+            const auto k = sink.match(ln);
+            if (k.hasMatch()) {
+                PathRow pr{"sink", "", "", k.captured(1), k.captured(1).section('.', 0, -2), {}, {}, false};
+                if (!rows.isEmpty() && rows.last().hop) pr.from = rows.last().to;
+                rows << pr;
+                continue;
+            }
+            if (ln.startsWith("Info: Max frequency") || ln.trimmed() == "Info:") flush(), cur.clear();
+        }
+        flush();
+        const QString keep = m_pathClock->currentText();
+        m_pathClock->blockSignals(true);
+        m_pathClock->clear();
+        for (auto it = m_paths.begin(); it != m_paths.end(); ++it) m_pathClock->addItem(it.key());
+        m_pathClock->blockSignals(false);
+        const QString want = m_paths.contains(keep) ? keep : m_worstClock;
+        if (!want.isEmpty()) m_pathClock->setCurrentText(want);
+        showPath(m_pathClock->currentText());
+    }
+    void showPath(const QString& clock) {
+        m_path->setRowCount(0);
+        QList<QPair<QPointF, QPointF>> hops;
+        for (const PathRow& r : m_paths.value(clock)) {
+            const int i = m_path->rowCount();
+            m_path->insertRow(i);
+            auto* t = new QTableWidgetItem(r.type);
+            t->setData(Qt::UserRole, r.cell);
+            t->setData(Qt::UserRole + 1, r.hop ? r.to : r.from);
+            m_path->setItem(i, 0, t);
+            m_path->setItem(i, 1, new QTableWidgetItem(r.curr));
+            m_path->setItem(i, 2, new QTableWidgetItem(r.total));
+            m_path->setItem(i, 3, new QTableWidgetItem(r.name));
+            m_path->setItem(i, 4, new QTableWidgetItem(r.hop ? QString("(%1,%2) -> (%3,%4)").arg(r.from.x()).arg(r.from.y()).arg(r.to.x()).arg(r.to.y()) : QString()));
+            if (r.type == "routing") for (int c = 0; c < 5; ++c) m_path->item(i, c)->setForeground(QColor(0x60, 0x60, 0x90));
+            if (r.hop) hops << qMakePair(r.from, r.to);
+        }
+        m_path->resizeColumnsToContents();
+        m_chip->drawPath(hops);
+        m_results->setTabText(m_results->indexOf(m_pathPanel), clock.isEmpty() ? "Critical path" : "Critical path (" + clock + ")");
     }
     void refreshProblems() {
         m_problems->clear();
@@ -621,6 +763,12 @@ private:
     QLabel* m_legend;
     QWidget* m_chipPanel;
     QListWidget* m_problems;
+    QComboBox* m_pathClock;
+    QTableWidget* m_path;
+    QWidget* m_pathPanel;
+    struct PathRow { QString type, curr, total, name, cell; QPointF from, to; bool hop = false; };
+    QMap<QString, QList<PathRow>> m_paths;  // clock -> its last critical-path report
+    QString m_worstClock;
     QPlainTextEdit* m_log;
     QMap<QString, QLabel*> m_stepStatus;
     QList<Step> m_queue;
