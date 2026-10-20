@@ -32,6 +32,14 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QFormLayout>
+#include <QHBoxLayout>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QStandardPaths>
 #include <QMainWindow>
 #include <QMap>
 #include <QMessageBox>
@@ -314,6 +322,303 @@ private:
 
 // ---------------------------------------------------------------- main window
 
+
+// ---------------------------------------------------------------- new project
+// Everything a project needs that is not toolchain plumbing.  The toolchain paths,
+// steps and device capacity come from a template project (projects/*.json next to
+// the binary), so a new project starts from a flow that is known to work.
+class NewProjectDialog final : public QDialog {
+public:
+    QString created;  // path of the written project file
+    ~NewProjectDialog() override { qDeleteAll(m_rows); }
+    explicit NewProjectDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("synthgui - new project");
+        resize(820, 640);
+        auto* form = new QFormLayout;
+
+        m_template = new QComboBox;
+        const QDir pd(projectsDir());
+        for (const QString& f : pd.entryList({"*.json"}, QDir::Files, QDir::Name)) m_template->addItem(f, pd.filePath(f));
+        form->addRow("Flow template", m_template);
+        connect(m_template, &QComboBox::currentIndexChanged, this, [this] { loadTemplate(); });
+
+        m_name = new QLineEdit;
+        m_name->setPlaceholderText("e.g. vc707_myboard");
+        form->addRow("Project name", m_name);
+        connect(m_name, &QLineEdit::textEdited, this, [this] { followName(); });
+
+        m_sources = new QListWidget;
+        m_sources->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        form->addRow("Sources\n(compile order)", listWithButtons(m_sources, {
+            {"Add files...", [this] { addSources(QFileDialog::getOpenFileNames(this, "HDL sources", lastDir(), "HDL (*.sv *.v *.svh *.vh);;All files (*)")); }},
+            {"Add folder...", [this] { addFolder(); }},
+            {"Up", [this] { move(m_sources, -1); }},
+            {"Down", [this] { move(m_sources, +1); }},
+            {"Remove", [this] { qDeleteAll(m_sources->selectedItems()); guessTop(); }}}));
+
+        m_top = new QComboBox;
+        m_top->setEditable(true);
+        form->addRow("Top module", m_top);
+        connect(m_top, &QComboBox::currentTextChanged, this, [this] { guessXdc(); });
+
+        m_incdirs = new QListWidget;
+        m_incdirs->setMaximumHeight(80);
+        form->addRow("Include dirs", listWithButtons(m_incdirs, {
+            {"Add...", [this] { const QString d = QFileDialog::getExistingDirectory(this, "Include directory", lastDir()); if (!d.isEmpty()) addUnique(m_incdirs, d); }},
+            {"Remove", [this] { qDeleteAll(m_incdirs->selectedItems()); }}}));
+
+        m_defines = new QLineEdit;
+        m_defines->setToolTip("space separated; NAME or NAME=VALUE");
+        form->addRow("Defines", m_defines);
+
+        m_xdc = pathRow(form, "Constraints (XDC)", false, "Xilinx constraints (*.xdc);;All files (*)");
+        m_srcdir = pathRow(form, "Memory init dir", true, QString());
+        m_srcdir->first->setToolTip("where $readmemh/$readmemb and INIT_FILE files are found");
+
+        m_blackboxes = new QLineEdit;
+        m_blackboxes->setToolTip("primitives kept as cells instead of being synthesised (space separated)");
+        form->addRow("Black boxes", m_blackboxes);
+        m_part = new QLineEdit;
+        form->addRow("Part", m_part);
+
+        m_work = pathRow(form, "Work directory", true, QString());
+        m_file = new QLineEdit;
+        auto* fb = new QPushButton("Browse...");
+        connect(fb, &QPushButton::clicked, this, [this] {
+            const QString f = QFileDialog::getSaveFileName(this, "Project file", m_file->text(), "synthgui project (*.json)");
+            if (!f.isEmpty()) { m_file->setText(f.endsWith(".json") ? f : f + ".json"); m_fileTouched = true; }
+        });
+        auto* fr = new QHBoxLayout;
+        fr->addWidget(m_file);
+        fr->addWidget(fb);
+        form->addRow("Project file", fr);
+        connect(m_file, &QLineEdit::textEdited, this, [this] { m_fileTouched = true; });
+        connect(m_work->first, &QLineEdit::textEdited, this, [this] { m_workTouched = true; });
+        connect(m_xdc->first, &QLineEdit::textEdited, this, [this] { m_xdcAuto = false; });
+
+        auto* buttons = new QDialogButtonBox;
+        auto* openBtn = buttons->addButton("Open existing...", QDialogButtonBox::ActionRole);
+        buttons->addButton("Create", QDialogButtonBox::AcceptRole);
+        buttons->addButton(QDialogButtonBox::Cancel);
+        connect(openBtn, &QPushButton::clicked, this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "Open project", projectsDir(), "synthgui project (*.json)");
+            if (!f.isEmpty()) { created = f; QDialog::accept(); }
+        });
+        connect(buttons, &QDialogButtonBox::accepted, this, [this] { create(); });
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+
+        auto* v = new QVBoxLayout(this);
+        v->addLayout(form);
+        v->addWidget(buttons);
+        loadTemplate();
+    }
+    static QString projectsDir() { return QDir(QCoreApplication::applicationDirPath() + "/../projects").absolutePath(); }
+
+    // for --selftest-new: fill the form as a user would, then press Create
+    void fill(const QString& name, const QStringList& sources, const QString& xdc, const QString& work, const QString& file) {
+        m_name->setText(name);
+        followName();
+        addSources(sources);
+        if (!xdc.isEmpty()) { m_xdc->first->setText(xdc); m_xdcAuto = false; }  // otherwise keep what was found beside the sources
+        if (!work.isEmpty()) { m_work->first->setText(work); m_workTouched = true; }
+        if (!file.isEmpty()) { m_file->setText(file); m_fileTouched = true; }
+        m_batch = true;  // no one to answer questions: take the default yes
+    }
+    void create() {
+        auto fail = [this](const QString& m) {
+            if (m_batch) qWarning("new project: %s", qPrintable(m));
+            else QMessageBox::warning(this, "new project", m);
+        };
+        const QString name = m_name->text().trimmed(), top = m_top->currentText().trimmed(), file = m_file->text().trimmed();
+        if (name.isEmpty()) return fail("Give the project a name.");
+        if (m_sources->count() == 0) return fail("Add at least one source file.");
+        if (top.isEmpty()) return fail("Choose the top module.");
+        if (file.isEmpty()) return fail("Choose where to save the project file.");
+        if (m_xdc->first->text().trimmed().isEmpty() && !ask("No constraints file: place and route will have no pins or clocks. Continue?"))
+            return;
+        if (QFileInfo::exists(file) && !ask(file + " exists. Replace it?"))
+            return;
+        QJsonObject o = m_tmpl;
+        o["name"] = name;
+        o["top"] = top;
+        o["work"] = home(m_work->first->text().trimmed());
+        o["xdc"] = home(m_xdc->first->text().trimmed());
+        o["srcdir"] = home(m_srcdir->first->text().trimmed());
+        o["part"] = m_part->text().trimmed();
+        o["device"] = m_part->text().trimmed().section(QRegularExpression("(ff|fb|sb|cs|cl|rb|rs)g?\\d"), 0, 0);
+        auto arr = [](const QStringList& l) { QJsonArray a; for (const QString& x : l) a.append(x); return a; };
+        QStringList src, inc;
+        for (int i = 0; i < m_sources->count(); ++i) src << home(m_sources->item(i)->text());
+        for (int i = 0; i < m_incdirs->count(); ++i) inc << home(m_incdirs->item(i)->text());
+        o["sources"] = arr(src);
+        o["incdirs"] = arr(inc);
+        o["defines"] = arr(m_defines->text().split(' ', Qt::SkipEmptyParts));
+        o["blackboxes"] = arr(m_blackboxes->text().split(' ', Qt::SkipEmptyParts));
+        QDir().mkpath(QFileInfo(file).absolutePath());
+        QFile f(file);
+        if (!f.open(QIODevice::WriteOnly)) return fail("Cannot write " + file);
+        f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
+        created = QFileInfo(file).absoluteFilePath();
+        QDialog::accept();
+    }
+
+private:
+    QComboBox* m_template;
+    QLineEdit *m_name, *m_defines, *m_blackboxes, *m_part, *m_file;
+    QListWidget *m_sources, *m_incdirs;
+    QComboBox* m_top;
+    QPair<QLineEdit*, bool>* m_xdc = nullptr;
+    QPair<QLineEdit*, bool>* m_srcdir = nullptr;
+    QPair<QLineEdit*, bool>* m_work = nullptr;
+    QList<QPair<QLineEdit*, bool>*> m_rows;
+    QJsonObject m_tmpl;
+    bool m_workTouched = false, m_fileTouched = false, m_batch = false, m_xdcAuto = true;
+    bool ask(const QString& q) { return m_batch || QMessageBox::question(this, "new project", q) == QMessageBox::Yes; }
+    QString m_lastDir;
+
+    static QString home(const QString& p) {  // store ~/... so projects move between accounts
+        const QString h = QDir::homePath();
+        return p.startsWith(h + "/") ? "~" + p.mid(h.size()) : p;
+    }
+    static QString unhome(const QString& p) { return p.startsWith("~/") ? QDir::homePath() + p.mid(1) : p; }
+    QString lastDir() const { return m_lastDir.isEmpty() ? QDir::homePath() : m_lastDir; }
+    QWidget* listWithButtons(QListWidget* list, const QList<QPair<QString, std::function<void()>>>& actions) {
+        auto* w = new QWidget;
+        auto* h = new QHBoxLayout(w);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->addWidget(list, 1);
+        auto* col = new QVBoxLayout;
+        for (const auto& a : actions) {
+            auto* b = new QPushButton(a.first);
+            connect(b, &QPushButton::clicked, this, a.second);
+            col->addWidget(b);
+        }
+        col->addStretch();
+        h->addLayout(col);
+        return w;
+    }
+    QPair<QLineEdit*, bool>* pathRow(QFormLayout* form, const QString& label, bool dir, const QString& filter) {
+        auto* row = new QPair<QLineEdit*, bool>(new QLineEdit, dir);
+        m_rows << row;
+        auto* b = new QPushButton("Browse...");
+        connect(b, &QPushButton::clicked, this, [this, row, label, filter] {
+            const QString start = row->first->text().isEmpty() ? lastDir() : unhome(row->first->text());
+            const QString r = row->second ? QFileDialog::getExistingDirectory(this, label, start)
+                                          : QFileDialog::getOpenFileName(this, label, start, filter);
+            if (r.isEmpty()) return;
+            row->first->setText(r);
+            if (row == m_work) m_workTouched = true;
+            if (row == m_xdc) m_xdcAuto = false;
+        });
+        auto* h = new QHBoxLayout;
+        h->addWidget(row->first);
+        h->addWidget(b);
+        form->addRow(label, h);
+        return row;
+    }
+    static void addUnique(QListWidget* l, const QString& s) {
+        for (int i = 0; i < l->count(); ++i)
+            if (l->item(i)->text() == s) return;
+        l->addItem(s);
+    }
+    static void move(QListWidget* l, int by) {
+        const int r = l->currentRow(), t = r + by;
+        if (r < 0 || t < 0 || t >= l->count()) return;
+        l->insertItem(t, l->takeItem(r));
+        l->setCurrentRow(t);
+    }
+    void loadTemplate() {
+        QFile f(m_template->currentData().toString());
+        if (!f.open(QIODevice::ReadOnly)) return;
+        m_tmpl = QJsonDocument::fromJson(f.readAll()).object();
+        auto join = [&](const char* k) {
+            QStringList l;
+            for (const auto& v : m_tmpl.value(k).toArray()) l << v.toString();
+            return l.join(' ');
+        };
+        m_blackboxes->setText(join("blackboxes"));
+        m_defines->setText(join("defines"));
+        m_part->setText(m_tmpl.value("part").toString());
+        m_tmpl.remove("sources");  // the design fields are the user's
+        m_tmpl.remove("incdirs");
+        m_tmpl.remove("xdc");
+        m_tmpl.remove("srcdir");
+    }
+    void followName() {
+        const QString n = m_name->text().trimmed();
+        if (!m_workTouched) m_work->first->setText(n.isEmpty() ? QString() : QDir::homePath() + "/synthgui-work/" + n);
+        if (!m_fileTouched) m_file->setText(n.isEmpty() ? QString() : projectsDir() + "/" + n + ".json");
+    }
+    void addFolder() {
+        const QString d = QFileDialog::getExistingDirectory(this, "Add every HDL file in", lastDir());
+        if (d.isEmpty()) return;
+        QStringList l;
+        for (const QString& f : QDir(d).entryList({"*.sv", "*.v"}, QDir::Files, QDir::Name)) l << QDir(d).filePath(f);
+        addSources(l);
+    }
+    void addSources(const QStringList& files) {
+        for (const QString& f : files) {
+            const QFileInfo fi(f);
+            m_lastDir = fi.absolutePath();
+            if (fi.suffix() == "svh" || fi.suffix() == "vh") { addUnique(m_incdirs, fi.absolutePath()); continue; }  // headers are included, not compiled
+            addUnique(m_sources, fi.absoluteFilePath());
+            // a directory holding headers or memory images is likely needed as well
+            const QDir d = fi.absoluteDir();
+            if (!d.entryList({"*.svh", "*.vh"}, QDir::Files).isEmpty()) addUnique(m_incdirs, d.absolutePath());
+            if (m_srcdir->first->text().isEmpty() && !d.entryList({"*.hex", "*.mem", "*.coe"}, QDir::Files).isEmpty())
+                m_srcdir->first->setText(d.absolutePath());
+        }
+        if (m_srcdir->first->text().isEmpty() && m_sources->count()) m_srcdir->first->setText(QFileInfo(m_sources->item(0)->text()).absolutePath());
+        guessTop();
+    }
+    // an .xdc beside the sources, preferring one named after the top and the open-flow (_open) variant
+    void guessXdc() {
+        if (!m_xdcAuto) return;
+        QString best;
+        int bestScore = -1;
+        QSet<QString> dirs;
+        for (int i = 0; i < m_sources->count(); ++i) dirs << QFileInfo(m_sources->item(i)->text()).absolutePath();
+        const QString top = m_top->currentText();
+        for (const QString& dn : dirs) {
+            const QDir d(dn);
+            for (const QString& x : d.entryList({"*.xdc"}, QDir::Files, QDir::Name)) {
+                const int score = (!top.isEmpty() && x.startsWith(top) ? 4 : 0) + (x.contains("open") ? 2 : 0) + (x.contains(top.section('_', 0, 0)) ? 1 : 0);
+                if (score > bestScore) { bestScore = score; best = d.filePath(x); }
+            }
+        }
+        m_xdc->first->setText(best);
+    }
+    // modules declared in the sources; the top is one no other source instantiates
+    void guessTop() {
+        static const QRegularExpression decl("^\\s*module\\s+(\\w+)", QRegularExpression::MultilineOption);
+        static const QRegularExpression comments("//[^\\n]*|/\\*.*?\\*/", QRegularExpression::DotMatchesEverythingOption);
+        QStringList mods;
+        QString all;
+        for (int i = 0; i < m_sources->count(); ++i) {
+            QFile f(m_sources->item(i)->text());
+            if (!f.open(QIODevice::ReadOnly)) continue;
+            const QString t = QString::fromUtf8(f.readAll()).remove(comments);
+            all += t + "\n";
+            auto it = decl.globalMatch(t);
+            while (it.hasNext()) mods << it.next().captured(1);
+        }
+        QStringList tops;
+        for (const QString& m : mods) {
+            const QRegularExpression use("^\\s*" + m + "\\s*(#\\s*\\(|\\w+\\s*\\()", QRegularExpression::MultilineOption);
+            if (!use.match(all).hasMatch()) tops << m;
+        }
+        const QString keep = m_top->currentText();
+        m_top->clear();
+        m_top->addItems(tops);  // likely tops first, then the rest
+        for (const QString& m : mods)
+            if (!tops.contains(m)) m_top->addItem(m);
+        if (!keep.isEmpty() && mods.contains(keep)) m_top->setCurrentText(keep);
+        else if (!tops.isEmpty()) m_top->setCurrentText(tops.last());  // the last uninstantiated module: usually the board top
+    }
+};
+
+void openProjectWindow(const QString& file);
+
 class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(Project p) : m_p(std::move(p)) {
@@ -415,6 +720,15 @@ public:
         tb->addAction("Run all", this, [this] { runSteps(m_p.steps); });
         tb->addAction("Stop", this, [this] { stop(); });
         tb->addAction("Reload results", this, [this] { refreshAll(); });
+        tb->addSeparator();
+        tb->addAction("New project...", this, [this] {
+            NewProjectDialog d(this);
+            if (d.exec() == QDialog::Accepted) openProjectWindow(d.created);
+        });
+        tb->addAction("Open project...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "Open project", QFileInfo(m_p.path).absolutePath(), "synthgui project (*.json)");
+            if (!f.isEmpty()) openProjectWindow(f);
+        });
 
         if (!m_p.sources.isEmpty()) openFile(m_p.sources.last(), 0);
         // the last run of each step, from <work>/<step>.status (exit code, seconds) or just its log
@@ -865,11 +1179,34 @@ int main(int argc, char** argv) {
     cl.addOption({"view", "view for --screenshot: chip, area, timing, log, problems", "name", "chip"});
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
+    QCommandLineOption selftest("selftest-new", "fill and create a new project: name,out.json,work,xdc,src...", "fields");
+    selftest.setFlags(QCommandLineOption::HiddenFromHelp);
+    cl.addOption(selftest);
     cl.process(app);
     Project p;
     QString err;
-    if (!cl.isSet("project") || !p.load(cl.value("project"), err)) {
-        QMessageBox::critical(nullptr, "synthgui", cl.isSet("project") ? err : "usage: synthgui --project p.json");
+    QString file = cl.value("project");
+    if (cl.isSet("selftest-new")) {  // drive the new-project dialog without a user
+        const QStringList a = cl.value("selftest-new").split(',');  // name,out.json,work,xdc,src...
+        NewProjectDialog d;
+        d.fill(a.value(0), a.mid(4), a.value(3), a.value(2), a.value(1));
+        if (cl.isSet("screenshot")) { d.show(); app.processEvents(); d.grab().save(cl.value("screenshot")); }
+        d.create();
+        if (d.created.isEmpty()) return 1;
+        file = d.created;
+        if (cl.isSet("screenshot")) return 0;
+    }
+    if (file.isEmpty()) {
+        if (cl.isSet("run") || cl.isSet("screenshot")) {
+            QMessageBox::critical(nullptr, "synthgui", "--run and --screenshot need --project p.json");
+            return 2;
+        }
+        NewProjectDialog d;
+        if (d.exec() != QDialog::Accepted) return 0;
+        file = d.created;
+    }
+    if (!p.load(file, err)) {
+        QMessageBox::critical(nullptr, "synthgui", err);
         return 2;
     }
     MainWindow w(p);
@@ -906,4 +1243,16 @@ int main(int argc, char** argv) {
     }
     w.show();
     return app.exec();
+}
+
+void openProjectWindow(const QString& file) {
+    Project p;
+    QString err;
+    if (!p.load(file, err)) {
+        QMessageBox::critical(nullptr, "synthgui", err);
+        return;
+    }
+    auto* w = new MainWindow(p);
+    w->setAttribute(Qt::WA_DeleteOnClose);
+    w->show();
 }

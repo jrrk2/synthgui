@@ -57,3 +57,20 @@ shows OpenSTA's worst path, drawn on the chip plot between the placed cells.
 On bramtest, OpenSTA agrees with nextpnr on nextpnr's own worst path to within
 about 7%, but it finds a deeper path (an incrementer after the UART divider
 compare) that nextpnr's report does not show.
+
+## New projects
+
+Run `build/synthgui` without `--project`, or press "New project..." on the toolbar, to
+get the new-project dialog. Choose a flow template from `projects/`, which supplies the
+toolchain paths, steps, part and black boxes. Then add sources with the file pickers.
+
+- **Top module:** proposed from the modules no other source instantiates.
+- **Include dirs:** added for directories that hold `.vh`/`.svh` headers.
+- **Constraints:** an `.xdc` beside the sources is proposed, preferring one named after
+  the top and the `_open` variant used by the nextpnr flow.
+- **Memory init dir:** a source directory holding `.hex`/`.mem` images, else the first.
+- **Work directory and project file:** default to `~/synthgui-work/<name>` and
+  `projects/<name>.json`.
+
+"Open existing..." in the dialog, or "Open project..." on the toolbar, opens a project
+file in a new window.
