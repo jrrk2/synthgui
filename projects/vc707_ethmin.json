@@ -70,7 +70,6 @@
   "python": "~/xc7-bitstream-tools/.venv/bin/python",
   "convert": "~/xc7-bitstream-tools/scripts/convert.py",
   "yosys": "~/xc7-bitstream-tools/yosys/yosys",
-  "fasm2netlist": "~/xc7-bitstream-tools/fasm2netlist/build/fasm2netlist",
   "lvs_equiv": "~/xc7-bitstream-tools/fasm2netlist/build/lvs_equiv",
   "sta": "~/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/sta",
   "openfpgaloader": "~/openFPGALoader/build/openFPGALoader",
@@ -93,7 +92,7 @@
     {
       "id": "lvs",
       "label": "LVS",
-      "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {yosys} -q -p 'read_json {json}; write_verilog -noattr {work}/{top}_mapped.v' && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"
+      "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {yosys} -q -p 'read_json {json}; hierarchy -top {top}; splitnets; select {top}; write_verilog -noattr -norename -selected {work}/lvs/gold.v' && {lvs_equiv} --gold {work}/lvs/gold.v --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --gold-json {json} --db {prjxray_db}/{family} --device {device} --quiet"
     },
     {
       "id": "bit",
@@ -114,5 +113,7 @@
     "DSP": 2800,
     "IO": 700,
     "BUFG": 32
-  }
+  },
+  "tileverilog": "~/xc7-bitstream-tools/fasm2netlist/build/tileverilog",
+  "family": "virtex7"
 }
