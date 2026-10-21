@@ -37,5 +37,7 @@ Differences from the original build:
   database it uses should not need it.
 
 On the VC707 (2026-10-21) it answers `12+34=46`, `355000000/113=3141592` and
-`9/0=E` at 200 MHz.  nextpnr reports 279 MHz; OpenSTA on the same SDF finds a
+`9/0=E` at 200 MHz, and multiplies on the DSP48E1 `355*113=40115`,
+`65535*65535=4294836225` and `123*456=56088` with no `?` (DSP and software
+agree).  nextpnr reports 279 MHz; OpenSTA on the same SDF finds a
 15-LUT path from the RX FIFO to the accumulator at about 142 MHz.
