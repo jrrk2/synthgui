@@ -84,7 +84,9 @@ cudd() {
     say cudd
     # autotools build in tree (OpenSTA needs it for its BDD package)
     cd "$deps/cudd"
-    [ -f configure ] || autoreconf -fi
+    # a git checkout leaves the generated autotools files no newer than their
+    # sources, and make would then regenerate them with the automake 1.14 they came from
+    touch aclocal.m4 configure Makefile.in config.h.in
     [ -f Makefile ] || ./configure --prefix="$prefix"
     make -j"$jobs" && make install
 }
