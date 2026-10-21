@@ -46,6 +46,11 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "strash; dch -f; if -K 6|Delay: structural choices\n"
          "strash; resyn2; if -K 6|resyn2, then map\n"
          "strash; dch -f; if -K 6; mfs2|Delay, then don't-care resynthesis"},
+        {"synth.bram_cascade", "Cascade deep block RAMs", OptionSpec::Bool, "1", "--map-only-bram-cascade", true,
+         "Memories deeper than 32K words are built from 32K x1 RAMB36s; this pairs them over the column's "
+         "cascade wires into 64K x1 memories (LOWER/UPPER, as Vivado does), halving the LUT multiplexer "
+         "behind every data bit.  An odd number of blocks is padded with one.  Needs a nextpnr that places "
+         "cascaded pairs (openXC7 main since #67)."},
         {"synth.wide_packed_mem", "Wide vectors as memories", OptionSpec::Bool, "1",
          "--struct-only-wide-packed-mem", true,
          "Treat packed vectors wider than 512 bits as flattened memories, so they can become block RAM."},
