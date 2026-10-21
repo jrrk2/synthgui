@@ -14,6 +14,7 @@
 //                                                     render one view from existing results and exit
 
 #include <QApplication>
+#include <QCloseEvent>
 #include <functional>
 #include <QCommandLineParser>
 #include <QDateTime>
@@ -660,7 +661,12 @@ public:
         // editors
         m_editors = new QTabWidget;
         m_editors->setTabsClosable(true);
-        connect(m_editors, &QTabWidget::tabCloseRequested, this, [this](int i) { m_editors->removeTab(i); });
+        connect(m_editors, &QTabWidget::tabCloseRequested, this, [this](int i) {
+            auto* ed = qobject_cast<QPlainTextEdit*>(m_editors->widget(i));
+            if (ed && !confirmUnsaved({ed}, "closing it")) return;
+            m_editors->removeTab(i);
+            delete ed;
+        });
         auto* save = new QShortcut(QKeySequence::Save, this);
         connect(save, &QShortcut::activated, this, [this] { saveCurrent(); });
 
@@ -779,6 +785,14 @@ public:
         return this;
     }
     void fitChip() { m_chip->fit(); }
+
+protected:
+    void closeEvent(QCloseEvent* e) override {
+        if (confirmUnsaved(dirtyEditors(), "closing the project")) e->accept();
+        else e->ignore();
+    }
+
+public:
     // batch: run these steps (ids, or "all"), then call done(ok)
     void runThen(const QStringList& ids, std::function<void(bool)> done) {
         QList<Step> steps;
@@ -814,6 +828,12 @@ private:
         ed->setLineWrapMode(QPlainTextEdit::NoWrap);
         ed->setPlainText(QString::fromUtf8(file.readAll()));
         ed->setProperty("file", f);
+        ed->document()->setModified(false);
+        // "*" on the tab while the text differs from the file
+        connect(ed->document(), &QTextDocument::modificationChanged, this, [this, ed](bool dirty) {
+            const int i = m_editors->indexOf(ed);
+            if (i >= 0) m_editors->setTabText(i, (dirty ? "*" : "") + QFileInfo(ed->property("file").toString()).fileName());
+        });
         new HdlHighlighter(ed->document(), f.endsWith(".xdc"));
         m_editors->setCurrentIndex(m_editors->addTab(ed, QFileInfo(f).fileName()));
         m_editors->setTabToolTip(m_editors->currentIndex(), f);
@@ -826,18 +846,45 @@ private:
         ed->centerCursor();
     }
     void saveCurrent() {
-        auto* ed = qobject_cast<QPlainTextEdit*>(m_editors->currentWidget());
-        if (!ed) return;
+        if (auto* ed = qobject_cast<QPlainTextEdit*>(m_editors->currentWidget())) save(ed);
+    }
+    bool save(QPlainTextEdit* ed) {
         QFile f(ed->property("file").toString());
-        if (f.open(QIODevice::WriteOnly)) {
-            f.write(ed->toPlainText().toUtf8());
-            statusBar()->showMessage("saved " + f.fileName(), 3000);
+        if (!f.open(QIODevice::WriteOnly) || f.write(ed->toPlainText().toUtf8()) < 0) {
+            QMessageBox::critical(this, "synthgui", "Cannot save " + f.fileName() + ": " + f.errorString());
+            return false;
         }
+        ed->document()->setModified(false);
+        statusBar()->showMessage("saved " + f.fileName(), 3000);
+        return true;
+    }
+    QList<QPlainTextEdit*> dirtyEditors() const {
+        QList<QPlainTextEdit*> r;
+        for (int i = 0; i < m_editors->count(); ++i)
+            if (auto* ed = qobject_cast<QPlainTextEdit*>(m_editors->widget(i)); ed && ed->document()->isModified()) r << ed;
+        return r;
+    }
+    // Save, discard or cancel before `what`; false means cancel.  The flow
+    // reads the files on disk, so a build after Discard ignores the edits.
+    bool confirmUnsaved(const QList<QPlainTextEdit*>& eds, const QString& what) {
+        QList<QPlainTextEdit*> dirty;
+        for (auto* ed : eds) if (ed->document()->isModified()) dirty << ed;
+        if (dirty.isEmpty()) return true;
+        QStringList names;
+        for (auto* ed : dirty) names << QFileInfo(ed->property("file").toString()).fileName();
+        const auto b = QMessageBox::warning(this, "synthgui",
+            QString("Unsaved changes in %1.\nSave before %2?").arg(names.join(", "), what),
+            QMessageBox::SaveAll | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::SaveAll);
+        if (b == QMessageBox::Cancel) return false;
+        if (b == QMessageBox::SaveAll)
+            for (auto* ed : dirty) if (!save(ed)) return false;
+        return true;
     }
 
     // ---- running the flow
     void runSteps(QList<Step> steps) {
         if (m_proc) return;
+        if (!confirmUnsaved(dirtyEditors(), "building")) return;
         m_queue = steps;
         next();
     }
