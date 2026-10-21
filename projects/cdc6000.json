@@ -16,22 +16,22 @@
         "LUTRAM": 130800,
         "RAMB36": 1030
     },
-    "convert": "~/xc7-bitstream-tools/scripts/convert.py",
+    "convert": "{deps}/xc7-bitstream-tools/scripts/convert.py",
     "defines": [
         "SYNTHESIS"
     ],
     "device": "xc7vx485t",
-    "fasm2netlist": "~/xc7-bitstream-tools/fasm2netlist/build/fasm2netlist",
+    "fasm2netlist": "{builds}/fasm2netlist/fasm2netlist",
     "incdirs": [
     ],
-    "lvs_equiv": "~/xc7-bitstream-tools/fasm2netlist/build/lvs_equiv",
+    "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
     "name": "cdc6000",
-    "nextpnr": "~/bytecode-work/pinned/build/nextpnr-himbaechel",
+    "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
     "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60",
-    "openfpgaloader": "~/openFPGALoader/build/openFPGALoader",
+    "openfpgaloader": "{prefix}/bin/openFPGALoader",
     "part": "xc7vx485tffg1761-2",
-    "prjxray_db": "~/bytecode-work/pinned/prjxray-db",
-    "python": "~/xc7-bitstream-tools/.venv/bin/python",
+    "prjxray_db": "{deps}/prjxray-db",
+    "python": "{builds}/venv/bin/python",
     "sources": [
         "~/cdc6000/rtl/cdc6000_sb.sv",
         "~/cdc6000/rtl/cdc_pkg.sv",
@@ -40,10 +40,10 @@
         "~/cdc6000/fpga/vc707/simpleuart.v"
     ],
     "srcdir": "~/cdc6000/rtl",
-    "sta": "~/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/sta",
+    "sta": "{prefix}/bin/sta",
     "steps": [
         {
-            "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator_root}/bin/verilator -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
+            "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
             "id": "synth",
             "label": "Synthesize"
         },
@@ -74,9 +74,10 @@
         }
     ],
     "top": "cdc6000_sb",
-    "verilator_root": "~/verilator",
+    "verilator": "{prefix}/bin/verilator",
+    "verilator_root": "{prefix}/share/verilator",
     "work": "~/synthgui-work/cdc6000",
     "xdc": "~/cdc6000/fpga/vc707/vc707.xdc",
-    "xilinx_stubs": "~/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v ~/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
-    "yosys": "~/xc7-bitstream-tools/yosys/yosys"
+    "xilinx_stubs": "{deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v {deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
+    "yosys": "{deps}/xc7-bitstream-tools/yosys/yosys"
 }

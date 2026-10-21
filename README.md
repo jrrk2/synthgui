@@ -6,6 +6,8 @@ A Qt 6 Widgets front end for the verilator synthesis flow:
     -> nextpnr-himbaechel -> fasm2netlist LVS -> prjxray bitstream -> openFPGALoader
 
 ```sh
+git clone --recurse-submodules <url> synthgui    # or: git submodule update --init
+scripts/build-deps.sh                            # tools from deps/ -> build-deps/
 cmake -S . -B build && cmake --build build -j
 build/synthgui --project projects/vc707_bramtest.json
 build/synthgui --project projects/vc707_bramtest.json --run synth,pnr --screenshot chip.png --view chip   # batch, headless with QT_QPA_PLATFORM=offscreen
@@ -74,3 +76,25 @@ toolchain paths, steps, part and black boxes. Then add sources with the file pic
 
 "Open existing..." in the dialog, or "Open project..." on the toolbar, opens a project
 file in a new window.
+
+## Dependencies and macOS
+
+The tools the flow calls are submodules under `deps/`:
+
+| submodule | provides |
+| --- | --- |
+| `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis |
+| `xc7-bitstream-tools` | pinned yosys, nextpnr (himbaechel/xilinx), prjxray, `fasm2netlist` (`tileverilog`, `lvs_equiv`), `convert.py` |
+| `prjxray-db` | segbits database (large) |
+| `OpenSTA` | `sta` |
+| `openFPGALoader` | programming |
+
+`scripts/build-deps.sh [tool ...]` builds them into `build-deps/` and installs into
+`build-deps/prefix`; the project files refer to the results as `{prefix}`, `{builds}` and
+`{deps}`, which the GUI resolves relative to the checkout, so they work on Linux and macOS
+alike. On macOS install the prerequisites with Homebrew first:
+
+    brew install qt cmake boost eigen autoconf automake bison flex help2man tcl-tk@8 swig \
+        libftdi libusb hidapi libffi pkgconf python
+
+and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --prefix qt)`.

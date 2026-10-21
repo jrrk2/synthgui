@@ -1,0 +1,22 @@
+[submodule "deps/verilator"]
+	path = deps/verilator
+	url = https://github.com/jrrk2/verilator.git
+	branch = synthesis
+	ignore = dirty
+[submodule "deps/xc7-bitstream-tools"]
+	path = deps/xc7-bitstream-tools
+	url = https://github.com/jrrk2/xc7-bitstream-tools.git
+	ignore = dirty
+[submodule "deps/prjxray-db"]
+	path = deps/prjxray-db
+	url = https://github.com/openXC7/prjxray-db.git
+[submodule "deps/OpenSTA"]
+	path = deps/OpenSTA
+	url = https://github.com/The-OpenROAD-Project/OpenSTA.git
+[submodule "deps/openFPGALoader"]
+	path = deps/openFPGALoader
+	url = https://github.com/trabucayre/openFPGALoader.git
+[submodule "deps/cudd"]
+	path = deps/cudd
+	url = https://github.com/The-OpenROAD-Project/cudd.git
+	ignore = dirty

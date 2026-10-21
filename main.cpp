@@ -77,8 +77,14 @@ struct Project {
     QMap<QString, int> capacity;  // device resources for utilisation
 
     QString abs(const QString& p) const { return QDir::isAbsolutePath(p) ? p : QDir(dir).filePath(p); }
+    // {deps} is the submodule checkout, {prefix} where scripts/build-deps.sh installs; both sit
+    // next to build/ like sta/ and projects/
+    static QString repoRoot() { return QDir(QCoreApplication::applicationDirPath() + "/..").absolutePath(); }
     static QString expandHome(QString s) {
         if (s.startsWith("~/")) s = QDir::homePath() + s.mid(1);
+        s.replace("{deps}", repoRoot() + "/deps");
+        s.replace("{prefix}", repoRoot() + "/build-deps/prefix");
+        s.replace("{builds}", repoRoot() + "/build-deps");
         return s;
     }
     bool load(const QString& file, QString& err) {
@@ -113,6 +119,9 @@ struct Project {
         }
         const QJsonObject cap = o.value("capacity").toObject();
         for (auto it = cap.begin(); it != cap.end(); ++it) capacity[it.key()] = it.value().toInt();
+        vars["deps"] = repoRoot() + "/deps";
+        vars["prefix"] = repoRoot() + "/build-deps/prefix";
+        vars["builds"] = repoRoot() + "/build-deps";
         vars["work"] = work;
         vars["json"] = work + "/" + top + ".json";
         vars["edif"] = work + "/" + top + ".edf";

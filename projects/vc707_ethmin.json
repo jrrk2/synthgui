@@ -62,22 +62,23 @@
     "IBUF",
     "OBUF"
   ],
-  "verilator_root": "~/verilator",
-  "xilinx_stubs": "~/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v ~/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
-  "nextpnr": "~/bytecode-work/pinned/build/nextpnr-himbaechel",
+  "verilator": "{prefix}/bin/verilator",
+  "verilator_root": "{prefix}/share/verilator",
+  "xilinx_stubs": "{deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v {deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
   "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60 --placer-heap-congestion-spread",
-  "prjxray_db": "~/bytecode-work/pinned/prjxray-db",
-  "python": "~/xc7-bitstream-tools/.venv/bin/python",
-  "convert": "~/xc7-bitstream-tools/scripts/convert.py",
-  "yosys": "~/xc7-bitstream-tools/yosys/yosys",
-  "lvs_equiv": "~/xc7-bitstream-tools/fasm2netlist/build/lvs_equiv",
-  "sta": "~/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/sta",
-  "openfpgaloader": "~/openFPGALoader/build/openFPGALoader",
+  "prjxray_db": "{deps}/prjxray-db",
+  "python": "{builds}/venv/bin/python",
+  "convert": "{deps}/xc7-bitstream-tools/scripts/convert.py",
+  "yosys": "{deps}/xc7-bitstream-tools/yosys/yosys",
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "sta": "{prefix}/bin/sta",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
   "steps": [
     {
       "id": "synth",
       "label": "Synthesize",
-      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator_root}/bin/verilator -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
     },
     {
       "id": "pnr",
@@ -114,6 +115,6 @@
     "IO": 700,
     "BUFG": 32
   },
-  "tileverilog": "~/xc7-bitstream-tools/fasm2netlist/build/tileverilog",
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
   "family": "virtex7"
 }

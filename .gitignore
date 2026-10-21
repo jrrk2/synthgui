@@ -1,3 +1,4 @@
 build/
 shots/
 build.cmake.log
+build-deps/
