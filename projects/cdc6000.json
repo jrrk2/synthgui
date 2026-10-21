@@ -33,13 +33,13 @@
     "prjxray_db": "{deps}/prjxray-db",
     "python": "{builds}/venv/bin/python",
     "sources": [
-        "~/cdc6000/rtl/cdc6000_sb.sv",
-        "~/cdc6000/rtl/cdc_pkg.sv",
-        "~/cdc6000/rtl/cdc6000_core.sv",
-        "~/cdc6000/fpga/vc707/vc707_cdc_top.v",
-        "~/cdc6000/fpga/vc707/simpleuart.v"
+        "{root}/projects/cdc6000-src/cdc_pkg.sv",
+        "{root}/projects/cdc6000-src/cdc6000_sb.sv",
+        "{root}/projects/cdc6000-src/cdc6000_core.sv",
+        "{root}/projects/cdc6000-src/vc707_cdc_top.v",
+        "{root}/projects/cdc6000-src/simpleuart.v"
     ],
-    "srcdir": "~/cdc6000/rtl",
+    "srcdir": "{root}/projects/cdc6000-src",
     "sta": "{prefix}/bin/sta",
     "steps": [
         {
@@ -77,7 +77,7 @@
     "verilator": "{prefix}/bin/verilator",
     "verilator_root": "{prefix}/share/verilator",
     "work": "~/synthgui-work/cdc6000",
-    "xdc": "~/cdc6000/fpga/vc707/vc707.xdc",
+    "xdc": "{root}/projects/cdc6000-src/vc707.xdc",
     "xilinx_stubs": "{deps}/yosys/share/xilinx/cells_sim.v {deps}/yosys/share/xilinx/cells_xtra.v",
     "yosys": "{deps}/yosys/yosys"
 }

@@ -1,19 +1,19 @@
 {
   "name": "vc707 bramtest",
   "top": "vc707_bramtest",
-  "work": "~/bytecode-work/synthgui-bramtest",
+  "work": "~/synthgui-work/vc707_bramtest",
   "device": "xc7vx485t",
   "part": "xc7vx485tffg1761-2",
-  "xdc": "~/bytecode/fpga/bramtest/vc707_bramtest_open.xdc",
-  "srcdir": "~/bytecode/fpga/bramtest",
+  "xdc": "{root}/projects/vc707_bramtest-src/vc707_bramtest_open.xdc",
+  "srcdir": "{root}/projects/vc707_bramtest-src",
   "sources": [
-    "~/bytecode/fpga/bramtest/bramtest.v",
-    "~/bytecode/fpga/bramtest/vc707_bramtest.v",
-    "~/bytecode/fpga/eth-rtl/simpleuart.v",
-    "~/bytecode/fpga/eth-rtl/clkgen_vc707.sv"
+    "{root}/projects/vc707_bramtest-src/bramtest.v",
+    "{root}/projects/vc707_bramtest-src/vc707_bramtest.v",
+    "{root}/projects/vc707_bramtest-src/simpleuart.v",
+    "{root}/projects/vc707_bramtest-src/clkgen_vc707.sv"
   ],
   "incdirs": [
-    "~/bytecode/fpga/bramtest"
+    "{root}/projects/vc707_bramtest-src"
   ],
   "defines": [
     "SYNTHESIS"
