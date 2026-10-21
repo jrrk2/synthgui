@@ -14,6 +14,12 @@
 //                                                     render one view from existing results and exit
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
+#include <QGroupBox>
+#include <QSaveFile>
+#include <QScrollArea>
+#include <QSpinBox>
 #include <QCloseEvent>
 #include <functional>
 #include <QCommandLineParser>
@@ -61,6 +67,8 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include "options.h"
+
 // ---------------------------------------------------------------- project
 
 // A project file: what to build and how.  Command templates use {name}
@@ -76,6 +84,7 @@ struct Project {
     QMap<QString, QString> vars;  // every string field, for templates
     QList<Step> steps;
     QMap<QString, int> capacity;  // device resources for utilisation
+    QMap<QString, QString> options;  // the tool options that are on (options.h), and each stage's extra flags
 
     QString abs(const QString& p) const { return QDir::isAbsolutePath(p) ? p : QDir(dir).filePath(p); }
     // {root} is the checkout, {deps} the submodules, {prefix} where scripts/build-deps.sh installs; both sit
@@ -117,8 +126,20 @@ struct Project {
         blackboxes = list("blackboxes");
         for (const auto& v : o.value("steps").toArray()) {
             const QJsonObject s = v.toObject();
-            steps << Step{s.value("id").toString(), s.value("label").toString(), s.value("command").toString()};
+            Step st{s.value("id").toString(), s.value("label").toString(), s.value("command").toString()};
+            // the Synthesis panel's options go at the end of the synthesis command
+            if (st.id == "synth" && !st.command.contains("{synth_options}")) st.command += " {synth_options}";
+            steps << st;
         }
+        // Options: the panels' own record, or (a project from before them) the
+        // nextpnr flags read back into options, what is not one kept as typed
+        const QJsonObject oo = o.value("options").toObject();
+        if (!oo.isEmpty()) {
+            for (auto it = oo.begin(); it != oo.end(); ++it) options[it.key()] = it.value().toString();
+        } else {
+            parseOptionArgs("pnr", o.value("nextpnr_flags").toString(), options);
+        }
+        applyOptions();
         const QJsonObject cap = o.value("capacity").toObject();
         for (auto it = cap.begin(); it != cap.end(); ++it) capacity[it.key()] = it.value().toInt();
         vars["root"] = repoRoot();
@@ -152,6 +173,26 @@ struct Project {
         vars["incdirs"] = inc.join(' ');
         vars["defines"] = def.join(' ');
         vars["blackboxes"] = bb.join(' ');
+        return true;
+    }
+    void applyOptions() {
+        vars["synth_options"] = expandHome(optionArgs("synth", options));
+        vars["nextpnr_flags"] = expandHome(optionArgs("pnr", options));
+    }
+    // Write the options back into the project file, leaving the rest of it as it is
+    bool saveOptions(QString& err) const {
+        QFile in(path);
+        if (!in.open(QIODevice::ReadOnly)) { err = "cannot read " + path; return false; }
+        QJsonObject o = QJsonDocument::fromJson(in.readAll()).object();
+        in.close();
+        QJsonObject oo;
+        for (auto it = options.begin(); it != options.end(); ++it) oo[it.key()] = it.value();
+        o["options"] = oo;
+        o["nextpnr_flags"] = optionArgs("pnr", options);  // for anything that reads the flags directly
+        QSaveFile out(path);
+        if (!out.open(QIODevice::WriteOnly)) { err = "cannot write " + path; return false; }
+        out.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
+        if (!out.commit()) { err = "cannot write " + path; return false; }
         return true;
     }
     QString expand(QString t) const {
@@ -639,6 +680,131 @@ private:
 
 void openProjectWindow(const QString& file);
 
+// ---------------------------------------------------------------- options
+
+// One stage's options (options.h): a checkbox per option -- unchecked leaves
+// the tool's own default -- with its value beside it, the options that change
+// the quality of results first, and the command line they make.
+class OptionsPanel final : public QWidget {
+public:
+    OptionsPanel(const QString& stage, const QString& tool, QMap<QString, QString>* on, std::function<void()> changed)
+        : m_stage(stage), m_on(on), m_changed(std::move(changed)) {
+        auto* lay = new QVBoxLayout(this);
+        auto* qor = new QGroupBox("Quality of results");
+        auto* other = new QGroupBox("Output");
+        auto* fq = new QFormLayout(qor);
+        auto* fo = new QFormLayout(other);
+        // the value under its checkbox when the column is too narrow for both
+        for (QFormLayout* f : {fq, fo}) {
+            f->setRowWrapPolicy(QFormLayout::WrapLongRows);
+            f->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        }
+        for (const OptionSpec& s : optionSpecs()) {
+            if (s.stage() != stage) continue;
+            QFormLayout* form = s.qor ? fq : fo;
+            auto* cb = new QCheckBox(s.label);
+            const QString tip = QString(s.tip) + "\n\n" + s.flag;
+            cb->setToolTip(tip);
+            cb->setChecked(on->contains(s.key));
+            QWidget* ed = editor(s);
+            if (ed) {
+                ed->setToolTip(tip);
+                ed->setEnabled(cb->isChecked());
+                form->addRow(cb, ed);
+            } else {
+                form->addRow(cb);
+            }
+            const QString key = s.key;
+            connect(cb, &QCheckBox::toggled, this, [this, key, ed, s](bool checked) {
+                if (ed) ed->setEnabled(checked);
+                if (checked) (*m_on)[key] = ed ? m_value[key]() : "1";
+                else m_on->remove(key);
+                update();
+            });
+        }
+        auto* extra = new QLineEdit(on->value(stage + ".extra"));
+        extra->setToolTip("Passed to " + tool + " as typed, after the options above");
+        connect(extra, &QLineEdit::editingFinished, this, [this, extra] {
+            if (extra->text().trimmed().isEmpty()) m_on->remove(m_stage + ".extra");
+            else (*m_on)[m_stage + ".extra"] = extra->text().trimmed();
+            update();
+        });
+        fo->addRow("Additional flags", extra);
+        m_line = new QPlainTextEdit;
+        m_line->setReadOnly(true);
+        m_line->setMaximumHeight(90);
+        m_line->setToolTip("What " + tool + " is given, from the options above");
+        lay->addWidget(qor);
+        lay->addWidget(other);
+        lay->addWidget(new QLabel(tool + " command line"));
+        lay->addWidget(m_line);
+        lay->addStretch(1);
+        m_line->setPlainText(optionArgs(m_stage, *m_on));
+    }
+
+private:
+    QWidget* editor(const OptionSpec& s) {
+        const QString key = s.key;
+        const QString start = m_on->contains(key) ? m_on->value(key) : QString(s.def);
+        auto set = [this, key](const QString& v) {
+            if (m_on->contains(key) && m_on->value(key) != v) { (*m_on)[key] = v; update(); }
+        };
+        switch (s.kind) {
+        case OptionSpec::Bool: return nullptr;
+        case OptionSpec::Int: {
+            auto* sb = new QSpinBox;
+            sb->setRange(int(s.lo), int(std::min(s.hi, 2e9)));
+            sb->setValue(start.toInt());
+            m_value[key] = [sb] { return QString::number(sb->value()); };
+            connect(sb, &QSpinBox::valueChanged, this, [set](int v) { set(QString::number(v)); });
+            return sb;
+        }
+        case OptionSpec::Real: {
+            auto* sb = new QDoubleSpinBox;
+            sb->setRange(s.lo, s.hi);
+            sb->setDecimals(2);
+            sb->setValue(start.toDouble());
+            m_value[key] = [sb] { return QString::number(sb->value()); };
+            connect(sb, &QDoubleSpinBox::valueChanged, this, [set](double v) { set(QString::number(v)); });
+            return sb;
+        }
+        case OptionSpec::Choice: {
+            // editable: a value not on the list (a custom ABC script) is kept as typed
+            auto* cb = new QComboBox;
+            cb->setEditable(true);
+            for (const auto& c : s.choiceList()) cb->addItem(c.second, c.first);
+            const int at = cb->findData(start);
+            if (at >= 0) cb->setCurrentIndex(at);
+            else cb->setEditText(start);
+            auto value = [cb] {
+                const int i = cb->findText(cb->currentText());
+                return i >= 0 ? cb->itemData(i).toString() : cb->currentText();
+            };
+            m_value[key] = value;
+            connect(cb, &QComboBox::currentTextChanged, this, [set, value](const QString&) { set(value()); });
+            return cb;
+        }
+        case OptionSpec::Text: {
+            auto* le = new QLineEdit(start);
+            m_value[key] = [le] { return le->text().trimmed(); };
+            connect(le, &QLineEdit::editingFinished, this, [set, le] { set(le->text().trimmed()); });
+            return le;
+        }
+        }
+        return nullptr;
+    }
+    void update() {
+        m_line->setPlainText(optionArgs(m_stage, *m_on));
+        if (m_changed) m_changed();
+    }
+
+    QString m_stage;
+    QMap<QString, QString>* m_on;
+    std::function<void()> m_changed;
+    QMap<QString, std::function<QString()>> m_value;
+    QPlainTextEdit* m_line = nullptr;
+};
+
 class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(Project p) : m_p(std::move(p)) {
@@ -727,10 +893,21 @@ public:
         right->addWidget(m_editors);
         right->addWidget(m_results);
         right->setSizes({450, 500});
+        // left: the files, and the options of the steps that take them
+        auto* side = m_side = new QTabWidget;
+        side->addTab(m_files, "Files");
+        auto optionsTab = [this, side](const QString& stage, const QString& tool, const QString& title) {
+            auto* scroll = new QScrollArea;
+            scroll->setWidgetResizable(true);
+            scroll->setWidget(new OptionsPanel(stage, tool, &m_p.options, [this] { optionsChanged(); }));
+            side->addTab(scroll, title);
+        };
+        optionsTab("synth", "Verilator", "Synthesis");
+        optionsTab("pnr", "nextpnr", "Place && route");
         auto* split = new QSplitter;
-        split->addWidget(m_files);
+        split->addWidget(side);
         split->addWidget(right);
-        split->setSizes({260, 1240});
+        split->setSizes({380, 1120});
         setCentralWidget(split);
 
         // pipeline
@@ -738,6 +915,7 @@ public:
         for (const Step& s : m_p.steps) {
             QAction* a = tb->addAction(s.label, this, [this, s] { runSteps({s}); });
             a->setToolTip(m_p.expand(s.command));
+            m_stepAction[s.id] = a;
             m_stepStatus[s.id] = new QLabel(" " + s.label + ": - ");
             statusBar()->addPermanentWidget(m_stepStatus[s.id]);
         }
@@ -781,6 +959,8 @@ public:
         if (name == "log") { m_results->setCurrentWidget(m_log); return this; }
         if (name == "problems") { m_results->setCurrentWidget(m_problems); return this; }
         if (name == "path") { m_results->setCurrentWidget(m_pathPanel); return this; }
+        if (name == "synthesis") { m_side->setCurrentIndex(1); return this; }
+        if (name == "pnr") { m_side->setCurrentIndex(2); return this; }
         m_results->setCurrentWidget(m_chipPanel);
         return this;
     }
@@ -879,6 +1059,16 @@ private:
         if (b == QMessageBox::SaveAll)
             for (auto* ed : dirty) if (!save(ed)) return false;
         return true;
+    }
+
+    // An option changed in a panel: the commands follow it, and so does the
+    // project file, so a batch run (--run) builds what the panels show
+    void optionsChanged() {
+        m_p.applyOptions();
+        for (const Step& s : m_p.steps)
+            if (m_stepAction.contains(s.id)) m_stepAction[s.id]->setToolTip(m_p.expand(s.command));
+        QString err;
+        if (!m_p.saveOptions(err)) statusBar()->showMessage("options not saved: " + err, 5000);
     }
 
     // ---- running the flow
@@ -1228,6 +1418,8 @@ private:
     QString m_worstClock;
     QPlainTextEdit* m_log;
     QMap<QString, QLabel*> m_stepStatus;
+    QMap<QString, QAction*> m_stepAction;
+    QTabWidget* m_side = nullptr;
     QList<Step> m_queue;
     Step m_cur;
     QProcess* m_proc = nullptr;
@@ -1242,7 +1434,10 @@ int main(int argc, char** argv) {
     cl.addHelpOption();
     cl.addOption({"project", "project file (JSON)", "file"});
     cl.addOption({"screenshot", "render a view to a PNG and exit", "png"});
-    cl.addOption({"view", "view for --screenshot: chip, area, timing, log, problems", "name", "chip"});
+    cl.addOption({"view", "view for --screenshot: chip, area, timing, log, problems, synthesis, pnr", "name", "chip"});
+    cl.addOption({"print-command", "print a step's command, the options applied, and exit", "step"});
+    cl.addOption({"set-option", "turn an option on with this value, or off with an empty one, and save it in the "
+                                "project (repeatable; keys as in the project's \"options\")", "key=value"});
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
     QCommandLineOption selftest("selftest-new", "fill and create a new project: name,out.json,work,xdc,src...", "fields");
@@ -1273,6 +1468,22 @@ int main(int argc, char** argv) {
     }
     if (!p.load(file, err)) {
         QMessageBox::critical(nullptr, "synthgui", err);
+        return 2;
+    }
+    if (cl.isSet("set-option")) {
+        for (const QString& kv : cl.values("set-option")) {
+            const QString k = kv.section('=', 0, 0), v = kv.section('=', 1);
+            if (v.isEmpty()) p.options.remove(k);
+            else p.options[k] = v;
+        }
+        p.applyOptions();
+        if (!p.saveOptions(err)) { fprintf(stderr, "%s\n", qPrintable(err)); return 2; }
+        if (!cl.isSet("print-command") && !cl.isSet("run") && !cl.isSet("screenshot")) return 0;
+    }
+    if (cl.isSet("print-command")) {
+        for (const Step& s : p.steps)
+            if (s.id == cl.value("print-command")) { printf("%s\n", qPrintable(p.expand(s.command))); return 0; }
+        fprintf(stderr, "no step %s\n", qPrintable(cl.value("print-command")));
         return 2;
     }
     MainWindow w(p);

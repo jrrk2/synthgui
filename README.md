@@ -34,7 +34,19 @@ What it does today (stage one: every tool is a separate process):
   the critical-path cells of failing clocks (or of the worst clock when all
   pass) drawn on top in red; mouse wheel zooms, drag pans.
 * **Problems**: errors and critical warnings from every step's log.
-* **Batch**: `--run <steps|all>` and `--screenshot <png> --view <name>`.
+* **Synthesis / Place & route options**: tabs beside the file list, one
+  checkbox per tool option (unchecked leaves the tool's default), those that
+  change the quality of results first -- the LUT mapping script; placer,
+  timing weight, congestion spreading, delay model, timing optimisation,
+  router, rip-up, hold fixing, seed -- and the command line they make.  They
+  are kept in the project's `options` and become `{synth_options}` (appended
+  to the synthesis command) and `{nextpnr_flags}`; a project from before them
+  has its `nextpnr_flags` read back into options.  The list is `options.h`.
+* **Batch**: `--run <steps|all>` and `--screenshot <png> --view <name>`
+  (views include `synthesis` and `pnr`, the option panels);
+  `--set-option key=value` (repeatable, empty to turn off) changes an option
+  in the project file, and `--print-command <step>` prints a step's command
+  with the options applied -- for scripted QoR sweeps.
 
 Next stages (not done): OpenSTA as a step (`virtex7.lib` from Vivado's SDK
 for the arcs, nextpnr's `--sdf` for the delays); the LVS mismatches and
