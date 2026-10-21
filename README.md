@@ -84,7 +84,8 @@ The tools the flow calls are submodules under `deps/`:
 | submodule | provides |
 | --- | --- |
 | `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis |
-| `xc7-bitstream-tools` | pinned yosys, nextpnr (himbaechel/xilinx), prjxray, `fasm2netlist` (`tileverilog`, `lvs_equiv`), `convert.py` |
+| `yosys`, `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; `xc7/convert.py` drives prjxray |
+| `fasm2netlist` | `tileverilog`, `lvs_equiv` |
 | `prjxray-db` | segbits database (large) |
 | `OpenSTA` | `sta` |
 | `openFPGALoader` | programming |

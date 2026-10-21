@@ -16,7 +16,7 @@
         "LUTRAM": 130800,
         "RAMB36": 1030
     },
-    "convert": "{deps}/xc7-bitstream-tools/scripts/convert.py",
+    "convert": "{root}/xc7/convert.py",
     "defines": [
         "SYNTHESIS"
     ],
@@ -78,6 +78,6 @@
     "verilator_root": "{prefix}/share/verilator",
     "work": "~/synthgui-work/cdc6000",
     "xdc": "~/cdc6000/fpga/vc707/vc707.xdc",
-    "xilinx_stubs": "{deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_sim.v {deps}/xc7-bitstream-tools/yosys/share/xilinx/cells_xtra.v",
-    "yosys": "{deps}/xc7-bitstream-tools/yosys/yosys"
+    "xilinx_stubs": "{deps}/yosys/share/xilinx/cells_sim.v {deps}/yosys/share/xilinx/cells_xtra.v",
+    "yosys": "{deps}/yosys/yosys"
 }

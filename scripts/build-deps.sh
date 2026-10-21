@@ -7,12 +7,12 @@
 # Builds go under build-deps/ and install into build-deps/prefix where the
 # tool allows it.  verilator and yosys build in their own tree regardless (their
 # makefiles write bin/ and obj_* beside the sources), so .gitmodules marks
-# those checkouts ignore=dirty.  Project files refer to the result as {prefix}.
+# those checkouts ignore=dirty.  The flow's FASM-to-bitstream script is xc7/convert.py.
+# Project files refer to the results as {prefix} and {builds}.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 deps=$root/deps
-xc7=$deps/xc7-bitstream-tools
 out=$root/build-deps
 prefix=$out/prefix
 mkdir -p "$out" "$prefix"
@@ -42,7 +42,7 @@ verilator() {
 
 yosys() {
     say yosys
-    git -C "$xc7" submodule update --init --recursive yosys
+    git -C "$deps/yosys" submodule update --init --recursive
     # a plain `make` here: the repository target uses nproc, which macOS lacks
     local extra=()
     if [ "$(uname -s)" = Darwin ]; then
@@ -51,21 +51,21 @@ yosys() {
         # in the environment, not on the command line: the makefile appends its own -I. to these
         export CXXFLAGS="-I$(brew --prefix libffi)/include" LINKFLAGS="-L$(brew --prefix libffi)/lib"
     fi
-    make -C "$xc7/yosys" -j"$jobs" "${extra[@]}"
-    test -x "$xc7/yosys/yosys"
+    make -C "$deps/yosys" -j"$jobs" "${extra[@]}"
+    test -x "$deps/yosys/yosys"
 }
 
 prjxray() {
     say prjxray tools
-    git -C "$xc7" submodule update --init --recursive prjxray
-    cmake -S "$xc7/prjxray" -B "$xc7/prjxray/build" -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$xc7/prjxray/build" --target bitread xc7frames2bit --parallel "$jobs"
+    git -C "$deps/prjxray" submodule update --init --recursive
+    cmake -S "$deps/prjxray" -B "$out/prjxray" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$out/prjxray" --target bitread xc7frames2bit --parallel "$jobs"
 }
 
 nextpnr() {
     say nextpnr-himbaechel
-    git -C "$xc7" submodule update --init --recursive nextpnr
-    cmake -S "$xc7/nextpnr" -B "$out/nextpnr" -DARCH=himbaechel -DHIMBAECHEL_UARCH=xilinx \
+    git -C "$deps/nextpnr" submodule update --init --recursive
+    cmake -S "$deps/nextpnr" -B "$out/nextpnr" -DARCH=himbaechel -DHIMBAECHEL_UARCH=xilinx \
         -DBUILD_GUI=OFF -DBUILD_PYTHON=OFF -DHIMBAECHEL_XILINX_DEVICES="xc7a50t;xc7vx485t" \
         -DHIMBAECHEL_PRJXRAY_DB="$deps/prjxray-db" -DCMAKE_BUILD_TYPE=Release \
         -DBoost_ROOT="$(brew --prefix boost 2>/dev/null || echo /usr)" \
@@ -75,8 +75,8 @@ nextpnr() {
 
 fasm2netlist() {
     say fasm2netlist
-    git -C "$xc7" submodule update --init --recursive fasm2netlist
-    cmake -S "$xc7/fasm2netlist" -B "$out/fasm2netlist" -DCMAKE_BUILD_TYPE=Release
+    git -C "$deps/fasm2netlist" submodule update --init --recursive
+    cmake -S "$deps/fasm2netlist" -B "$out/fasm2netlist" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$out/fasm2netlist" --parallel "$jobs"
 }
 
@@ -112,10 +112,10 @@ ofl() {
 
 venv() {
     say python venv for prjxray fasm2frames
-    git -C "$xc7" submodule update --init --recursive prjxray
+    git -C "$deps/prjxray" submodule update --init --recursive
     python3 -m venv "$out/venv"
     # requirements.txt names its editable installs relative to prjxray/
-    (cd "$xc7/prjxray" && "$out/venv/bin/python" -m pip install -q -r requirements.txt -e third_party/fasm)
+    (cd "$deps/prjxray" && "$out/venv/bin/python" -m pip install -q -r requirements.txt -e third_party/fasm)
 }
 
 tools=("$@")
