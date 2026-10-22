@@ -26,6 +26,7 @@ struct OptionSpec {
     double lo = 0, hi = 1e9;   // Int/Real range
 
     QString stage() const { return QString(key).section('.', 0, 0); }
+    bool isWarning() const { return QString(key).section('.', 1, 1) == "warn"; }
     QList<QPair<QString, QString>> choiceList() const {
         QList<QPair<QString, QString>> l;
         for (const QString& c : QString(choices).split('\n', Qt::SkipEmptyParts))
@@ -58,6 +59,34 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "Write the EDIF as one flat cell rather than with the design's hierarchy."},
         {"synth.keep_temps", "Keep ABC's files", OptionSpec::Bool, "1", "--map-only-keep-temps", false,
          "Keep the AIGER and BLIF files handed to and from ABC beside the netlist."},
+
+        // ---- synthesis: Verilator's warnings, each one checked is not reported
+        {"synth.warn.WIDTHTRUNC", "WIDTHTRUNC: value truncated to a narrower target", OptionSpec::Bool, "1", "-Wno-WIDTHTRUNC", false,
+         "An assignment or connection drops the upper bits of a wider value."},
+        {"synth.warn.WIDTHEXPAND", "WIDTHEXPAND: value extended to a wider target", OptionSpec::Bool, "1", "-Wno-WIDTHEXPAND", false,
+         "An assignment or connection pads a narrower value to a wider one."},
+        {"synth.warn.MULTIDRIVEN", "MULTIDRIVEN: signal driven from more than one block", OptionSpec::Bool, "1", "-Wno-MULTIDRIVEN", false,
+         "Different always blocks assign the same variable."},
+        {"synth.warn.BLKANDNBLK", "BLKANDNBLK: blocking and non-blocking writes to one variable", OptionSpec::Bool, "1", "-Wno-BLKANDNBLK", false,
+         "A variable is assigned with both = and <=."},
+        {"synth.warn.PINMISSING", "PINMISSING: instance pin not connected", OptionSpec::Bool, "1", "-Wno-PINMISSING", false,
+         "A module or primitive instance leaves a port out of its connection list."},
+        {"synth.warn.UNOPTFLAT", "UNOPTFLAT: logic loop Verilator cannot order", OptionSpec::Bool, "1", "-Wno-UNOPTFLAT", false,
+         "Combinational logic that, flattened, reads a signal it drives."},
+        {"synth.warn.TIMESCALEMOD", "TIMESCALEMOD: timescale on some modules only", OptionSpec::Bool, "1", "-Wno-TIMESCALEMOD", false,
+         "Some source files set a `timescale and others do not."},
+        {"synth.warn.SPECIFYIGN", "SPECIFYIGN: specify blocks ignored", OptionSpec::Bool, "1", "-Wno-SPECIFYIGN", false,
+         "The primitive models' timing (specify) blocks, which synthesis has no use for; one line per primitive."},
+        {"synth.warn.CASEINCOMPLETE", "CASEINCOMPLETE: case without every value or a default", OptionSpec::Bool, "1", "-Wno-CASEINCOMPLETE", false,
+         "A case statement can fall through with no branch taken."},
+        {"synth.warn.LATCH", "LATCH: combinational block infers a latch", OptionSpec::Bool, "1", "-Wno-LATCH", false,
+         "A combinational always block leaves a variable unassigned on some path."},
+        {"synth.warn.SELRANGE", "SELRANGE: bit select out of range", OptionSpec::Bool, "1", "-Wno-SELRANGE", false,
+         "A constant bit or part select reaches outside the vector."},
+        {"synth.warn.COMBDLY", "COMBDLY: non-blocking write in combinational logic", OptionSpec::Bool, "1", "-Wno-COMBDLY", false,
+         "A <= assignment in a combinational block."},
+        {"synth.warn.IMPLICIT", "IMPLICIT: implicitly declared net", OptionSpec::Bool, "1", "-Wno-IMPLICIT", false,
+         "A net used without a declaration."},
 
         // ---- place and route: nextpnr-himbaechel (xilinx)
         {"pnr.placer", "Placer", OptionSpec::Choice, "heap", "--placer {}", true,

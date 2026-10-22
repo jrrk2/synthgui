@@ -12,10 +12,20 @@
     "{root}/projects/vc707_bramtest-src/simpleuart.v",
     "{root}/projects/vc707_bramtest-src/clkgen_vc707.sv"
   ],
-  "incdirs": ["{root}/projects/vc707_bramtest-src"],
-  "defines": ["SYNTHESIS"],
-  "blackboxes": ["BUFG", "IBUFDS", "MMCME2_ADV", "IBUF", "OBUF", "RAMB36E1"],
-
+  "incdirs": [
+    "{root}/projects/vc707_bramtest-src"
+  ],
+  "defines": [
+    "SYNTHESIS"
+  ],
+  "blackboxes": [
+    "BUFG",
+    "IBUFDS",
+    "MMCME2_ADV",
+    "IBUF",
+    "OBUF",
+    "RAMB36E1"
+  ],
   "verilator": "{prefix}/bin/verilator",
   "verilator_root": "{prefix}/share/verilator",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
@@ -28,21 +38,55 @@
   "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
   "sta": "{prefix}/bin/sta",
   "openfpgaloader": "{prefix}/bin/openFPGALoader",
-
   "steps": [
-    {"id": "synth", "label": "Synthesize",
-     "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"},
-    {"id": "pnr", "label": "Place & Route",
-     "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"},
-    {"id": "sta", "label": "OpenSTA",
-     "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"},
-    {"id": "lvs", "label": "LVS",
-     "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"},
-    {"id": "bit", "label": "Bitstream",
-     "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"},
-    {"id": "program", "label": "Program",
-     "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"}
+    {
+      "id": "synth",
+      "label": "Synthesize",
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+    },
+    {
+      "id": "pnr",
+      "label": "Place & Route",
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"
+    },
+    {
+      "id": "sta",
+      "label": "OpenSTA",
+      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"
+    },
+    {
+      "id": "lvs",
+      "label": "LVS",
+      "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"
+    },
+    {
+      "id": "bit",
+      "label": "Bitstream",
+      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"
+    },
+    {
+      "id": "program",
+      "label": "Program",
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    }
   ],
-
-  "capacity": {"LUT": 303600, "FF": 607200, "RAMB36": 1030, "LUTRAM": 130800, "DSP": 2800, "IO": 700, "BUFG": 32}
+  "capacity": {
+    "LUT": 303600,
+    "FF": 607200,
+    "RAMB36": 1030,
+    "LUTRAM": 130800,
+    "DSP": 2800,
+    "IO": 700,
+    "BUFG": 32
+  },
+  "options": {
+    "synth.warn.WIDTHTRUNC": "1",
+    "synth.warn.WIDTHEXPAND": "1",
+    "synth.warn.MULTIDRIVEN": "1",
+    "synth.warn.BLKANDNBLK": "1",
+    "synth.warn.PINMISSING": "1",
+    "synth.warn.UNOPTFLAT": "1",
+    "synth.warn.TIMESCALEMOD": "1",
+    "synth.warn.SPECIFYIGN": "1"
+  }
 }

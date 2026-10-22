@@ -135,11 +135,10 @@ struct Project {
         // Options: the panels' own record, or (a project from before them) the
         // nextpnr flags read back into options, what is not one kept as typed
         const QJsonObject oo = o.value("options").toObject();
-        if (!oo.isEmpty()) {
-            for (auto it = oo.begin(); it != oo.end(); ++it) options[it.key()] = it.value().toString();
-        } else {
-            parseOptionArgs("pnr", o.value("nextpnr_flags").toString(), options);
-        }
+        for (auto it = oo.begin(); it != oo.end(); ++it) options[it.key()] = it.value().toString();
+        bool anyPnr = false;
+        for (auto it = options.begin(); it != options.end(); ++it) anyPnr |= it.key().startsWith("pnr.");
+        if (!anyPnr) parseOptionArgs("pnr", o.value("nextpnr_flags").toString(), options);
         applyOptions();
         const QJsonObject cap = o.value("capacity").toObject();
         for (auto it = cap.begin(); it != cap.end(); ++it) capacity[it.key()] = it.value().toInt();
@@ -700,16 +699,21 @@ public:
         auto* lay = new QVBoxLayout(this);
         auto* qor = new QGroupBox("Quality of results");
         auto* other = new QGroupBox("Output");
+        auto* warn = new QGroupBox("Warnings not reported");
+        warn->setToolTip("Checked: the tool does not report this warning");
         auto* fq = new QFormLayout(qor);
         auto* fo = new QFormLayout(other);
+        auto* fw = new QFormLayout(warn);
+        bool anyWarning = false;
         // the value under its checkbox when the column is too narrow for both
-        for (QFormLayout* f : {fq, fo}) {
+        for (QFormLayout* f : {fq, fo, fw}) {
             f->setRowWrapPolicy(QFormLayout::WrapLongRows);
             f->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         }
         for (const OptionSpec& s : optionSpecs()) {
             if (s.stage() != stage) continue;
-            QFormLayout* form = s.qor ? fq : fo;
+            anyWarning |= s.isWarning();
+            QFormLayout* form = s.isWarning() ? fw : s.qor ? fq : fo;
             auto* cb = new QCheckBox(s.label);
             const QString tip = QString(s.tip) + "\n\n" + s.flag;
             cb->setToolTip(tip);
@@ -744,6 +748,8 @@ public:
         m_line->setToolTip("What " + tool + " is given, from the options above");
         lay->addWidget(qor);
         lay->addWidget(other);
+        if (anyWarning) lay->addWidget(warn);
+        else delete warn;
         lay->addWidget(new QLabel(tool + " command line"));
         lay->addWidget(m_line);
         lay->addStretch(1);
