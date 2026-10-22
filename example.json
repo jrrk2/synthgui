@@ -32,13 +32,13 @@
 
   "steps": [
     {"id": "synth", "label": "Synthesize",
-     "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"},
+     "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-TIMESCALEMOD {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"},
     {"id": "pnr", "label": "Place & Route",
      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"},
     {"id": "sta", "label": "OpenSTA",
      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"},
     {"id": "lvs", "label": "LVS",
-     "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {yosys} -q -p 'read_json {json}; write_verilog -noattr {work}/{top}_mapped.v' && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"},
+     "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}"},
     {"id": "bit", "label": "Bitstream",
      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"},
     {"id": "program", "label": "Program",

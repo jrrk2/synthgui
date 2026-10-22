@@ -80,6 +80,22 @@ one on the board", not "this one is broken".
 Without a delay matrix file in the Delay model the step uses nextpnr's
 fallback formula, whose scores are not comparable with a budget.
 
+## LVS step
+
+The LVS step extracts a netlist from the FASM (`tileverilog`) and proves it,
+register by register, equal to the synthesis's.  The gold side is
+Verilator's JSON itself (`lvs_equiv --gold <top>.json`): nothing converts it
+to Verilog first.  The synthesis also writes the same netlist as Verilog,
+`<work>/<top>_mapped.v`, for simulating it against the primitives' models.
+
+On the ROM-Linux SoC it proves 70549 points with none differing: registers,
+the register file and FIFOs in distributed RAM (RAM64X1D), and the 735
+block RAMs' boundaries, contents and configuration.  Registers whose clock
+is a constant (the unused JTAG bridge's) have no clock edge to compare, and
+a RAM's address bit tied to one constant for both read and write (an 8-deep
+FIFO in a 64-entry column) only picks the part of the RAM used; both are
+counted and left out.
+
 ## OpenSTA step
 
 Place & Route also writes the routed design (`--write`) and an SDF (`--sdf`).
@@ -122,9 +138,10 @@ The tools the flow calls are submodules under `deps/`:
 
 | submodule | provides |
 | --- | --- |
-| `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis |
-| `yosys`, `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; `xc7/convert.py` drives prjxray |
-| `fasm2netlist` | `tileverilog`, `lvs_equiv` |
+| `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog |
+| `yosys` | only its Xilinx primitive models (`cells_sim.v`, `cells_xtra.v`): Verilator's cell stubs, and what the mapped Verilog simulates against.  Nothing runs yosys. |
+| `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; `xc7/convert.py` drives prjxray |
+| `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
 | `prjxray-db` | segbits database (large) |
 | `OpenSTA` | `sta` |
 | `openFPGALoader` | programming |
