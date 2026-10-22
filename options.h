@@ -115,8 +115,9 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          true,
          "After placing, group the block RAMs by the read multiplexers their outputs feed, place each group "
          "together next to the registers it reaches, and place everything else again around them.  What "
-         "makes a deep ROM read correctly on the board; about doubles placement time.",
-         "on|On (the default)\noff|Off"},
+         "makes a deep ROM read correctly on the board; about doubles placement time.  On by default only "
+         "where the clock delays are measured (xc7vx485t); force runs it on any die.",
+         "on|On (measured dies)\noff|Off\nforce|Force: on any die"},
         {"pnr.router", "Router", OptionSpec::Choice, "router2", "--router {}", true,
          "router2 is the faster, congestion-negotiating router.", "router2|router2\nrouter1|router1"},
         {"pnr.tmg_ripup", "Timing-driven rip-up", OptionSpec::Bool, "1", "--tmg-ripup", true,
