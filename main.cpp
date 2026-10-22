@@ -56,6 +56,7 @@
 #include <QSet>
 #include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QSyntaxHighlighter>
 #include <QTabWidget>
@@ -881,13 +882,32 @@ public:
             const QString f = it->data(Qt::UserRole).toString();
             if (!f.isEmpty()) openFile(f, it->data(Qt::UserRole + 1).toInt());
         });
-        m_log = new QPlainTextEdit;
-        m_log->setReadOnly(true);
-        m_log->setMaximumBlockCount(20000);
+        // Log: the steps down the left, coloured by their last result, each
+        // with its own output -- a step's log stays put while another runs
         QFont mono("Monospace");
         mono.setStyleHint(QFont::TypeWriter);
-        m_log->setFont(mono);
-        m_results->addTab(m_log, "Log");
+        m_logList = new QListWidget;
+        m_logStack = new QStackedWidget;
+        for (const Step& st : m_p.steps) {
+            auto* ed = new QPlainTextEdit;
+            ed->setReadOnly(true);
+            ed->setMaximumBlockCount(20000);
+            ed->setFont(mono);
+            m_logs[st.id] = ed;
+            m_logStack->addWidget(ed);
+            auto* it = new QListWidgetItem(st.label, m_logList);
+            it->setData(Qt::UserRole, st.id);
+            it->setForeground(QColor(0x60, 0x60, 0x60));
+        }
+        m_logList->setMaximumWidth(m_logList->sizeHintForColumn(0) + 24);
+        connect(m_logList, &QListWidget::currentRowChanged, m_logStack, &QStackedWidget::setCurrentIndex);
+        m_logPanel = new QWidget;
+        auto* logLayout = new QHBoxLayout(m_logPanel);
+        logLayout->setContentsMargins(0, 0, 0, 0);
+        logLayout->setSpacing(0);
+        logLayout->addWidget(m_logList);
+        logLayout->addWidget(m_logStack, 1);
+        m_results->addTab(m_logPanel, "Log");
         m_results->addTab(m_area, "Area");
         m_results->addTab(m_timing, "Timing");
         m_results->addTab(chipPanel, "Chip");
@@ -945,17 +965,17 @@ public:
         for (const Step& s : m_p.steps) {
             QFile st(m_p.work + "/" + s.id + ".status");
             const QFileInfo lf(m_p.logPath(s.id));
-            QLabel* l = m_stepStatus[s.id];
             if (st.open(QIODevice::ReadOnly)) {
                 const QStringList f = QString::fromUtf8(st.readAll()).split(' ');
                 const bool ok = f.value(0).trimmed() == "0";
-                l->setText(QString(" %1: %2 (%3 s, %4) ").arg(s.label, ok ? "ok" : "FAILED", f.value(1).trimmed(), lf.lastModified().toString("dd MMM hh:mm")));
-                l->setStyleSheet(ok ? "color: #208020" : "color: #c02020");
+                setStepState(s.id, QString(" %1: %2 (%3 s, %4) ").arg(s.label, ok ? "ok" : "FAILED", f.value(1).trimmed(), lf.lastModified().toString("dd MMM hh:mm")),
+                             ok ? "#208020" : "#c02020");
             } else if (lf.exists()) {
-                l->setText(QString(" %1: log of %2 ").arg(s.label, lf.lastModified().toString("dd MMM hh:mm")));
-                l->setStyleSheet("color: #606060");
+                setStepState(s.id, QString(" %1: log of %2 ").arg(s.label, lf.lastModified().toString("dd MMM hh:mm")), "#606060");
             }
+            loadLog(s.id);
         }
+        if (!m_p.steps.isEmpty()) m_logList->setCurrentRow(0);
         refreshAll();
     }
 
@@ -963,7 +983,7 @@ public:
     QWidget* view(const QString& name) {
         if (name == "area") { m_results->setCurrentWidget(m_area); return this; }
         if (name == "timing") { m_results->setCurrentWidget(m_timing); return this; }
-        if (name == "log") { m_results->setCurrentWidget(m_log); return this; }
+        if (name == "log") { m_results->setCurrentWidget(m_logPanel); return this; }
         if (name == "problems") { m_results->setCurrentWidget(m_problems); return this; }
         if (name == "path") { m_results->setCurrentWidget(m_pathPanel); return this; }
         if (name == "synthesis") { m_side->setCurrentIndex(1); return this; }
@@ -987,12 +1007,32 @@ public:
         m_done = std::move(done);
         runSteps(steps);
     }
+    // select a step's page in the Log tab
     void showLog(const QString& stepId) {
-        QFile f(m_p.logPath(stepId));
-        if (f.open(QIODevice::ReadOnly)) m_log->setPlainText(QString::fromLocal8Bit(f.readAll()).right(60000));
+        for (int i = 0; i < m_logList->count(); ++i)
+            if (m_logList->item(i)->data(Qt::UserRole).toString() == stepId) m_logList->setCurrentRow(i);
     }
 
 private:
+    // a step's last log, read into its page
+    void loadLog(const QString& stepId) {
+        QPlainTextEdit* ed = m_logs.value(stepId);
+        QFile f(m_p.logPath(stepId));
+        if (!ed || !f.open(QIODevice::ReadOnly)) return;
+        ed->setPlainText(QString::fromLocal8Bit(f.readAll()).right(60000));
+        ed->moveCursor(QTextCursor::End);  // where the step's result is
+    }
+    // a step's state, on the status bar and on its entry in the Log tab's list
+    void setStepState(const QString& stepId, const QString& text, const char* colour) {
+        if (QLabel* l = m_stepStatus.value(stepId)) {
+            l->setText(text);
+            l->setStyleSheet(QString("color: ") + colour);
+        }
+        for (int i = 0; i < m_logList->count(); ++i) {
+            QListWidgetItem* it = m_logList->item(i);
+            if (it->data(Qt::UserRole).toString() == stepId) it->setForeground(QColor(colour));
+        }
+    }
     void addFile(QTreeWidgetItem* parent, const QString& f) {
         auto* it = new QTreeWidgetItem(parent, QStringList(QFileInfo(f).fileName()));
         it->setData(0, Qt::UserRole, f);
@@ -1094,13 +1134,14 @@ private:
         const Step s = m_queue.takeFirst();
         m_cur = s;
         const QString cmd = m_p.expand(s.command);
-        m_log->clear();
-        m_results->setCurrentWidget(m_log);
-        m_log->appendPlainText("$ " + cmd + "\n");
+        m_curLog = m_logs.value(s.id);
+        m_curLog->clear();
+        showLog(s.id);
+        m_results->setCurrentWidget(m_logPanel);
+        m_curLog->appendPlainText("$ " + cmd + "\n");
         m_logFile.setFileName(m_p.logPath(s.id));
         m_logFile.open(QIODevice::WriteOnly | QIODevice::Truncate);
-        m_stepStatus[s.id]->setText(" " + s.label + ": running ");
-        m_stepStatus[s.id]->setStyleSheet("color: #b07000");
+        setStepState(s.id, " " + s.label + ": running ", "#b07000");
         m_t0 = QDateTime::currentMSecsSinceEpoch();
         m_proc = new QProcess(this);
         m_proc->setProcessChannelMode(QProcess::MergedChannels);
@@ -1108,16 +1149,15 @@ private:
         connect(m_proc, &QProcess::readyRead, this, [this] {
             const QByteArray b = m_proc->readAll();
             m_logFile.write(b);
-            m_log->moveCursor(QTextCursor::End);
-            m_log->insertPlainText(QString::fromLocal8Bit(b));
-            m_log->moveCursor(QTextCursor::End);
+            m_curLog->moveCursor(QTextCursor::End);
+            m_curLog->insertPlainText(QString::fromLocal8Bit(b));
+            m_curLog->moveCursor(QTextCursor::End);
         });
         connect(m_proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus) {
             m_logFile.close();
             const double secs = (QDateTime::currentMSecsSinceEpoch() - m_t0) / 1000.0;
-            QLabel* l = m_stepStatus[m_cur.id];
-            l->setText(QString(" %1: %2 (%3 s) ").arg(m_cur.label, code ? "FAILED" : "ok").arg(secs, 0, 'f', 0));
-            l->setStyleSheet(code ? "color: #c02020" : "color: #208020");
+            setStepState(m_cur.id, QString(" %1: %2 (%3 s) ").arg(m_cur.label, code ? "FAILED" : "ok").arg(secs, 0, 'f', 0),
+                         code ? "#c02020" : "#208020");
             QFile st(m_p.work + "/" + m_cur.id + ".status");
             if (st.open(QIODevice::WriteOnly)) st.write(QString("%1 %2\n").arg(code).arg(secs, 0, 'f', 0).toUtf8());
             m_proc->deleteLater();
@@ -1467,7 +1507,11 @@ private:
     struct PathRow { QString type, curr, total, name, cell; QPointF from, to; bool hop = false; };
     QMap<QString, QList<PathRow>> m_paths;  // clock -> its last critical-path report
     QString m_worstClock;
-    QPlainTextEdit* m_log;
+    QWidget* m_logPanel;
+    QListWidget* m_logList;
+    QStackedWidget* m_logStack;
+    QMap<QString, QPlainTextEdit*> m_logs;  // step id -> its page
+    QPlainTextEdit* m_curLog = nullptr;     // the running step's page
     QMap<QString, QLabel*> m_stepStatus;
     QMap<QString, QAction*> m_stepAction;
     QTabWidget* m_side = nullptr;

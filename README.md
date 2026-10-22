@@ -33,6 +33,10 @@ What it does today (stage one: every tool is a separate process):
   position, coloured by kind (block RAM / DSP drawn at their five-row size),
   the critical-path cells of failing clocks (or of the worst clock when all
   pass) drawn on top in red; mouse wheel zooms, drag pans.
+* **Log**: the steps down the left, each coloured by its last result (green
+  ok, red failed, amber running, grey a log of unknown result), and beside
+  them the selected step's output; a running step's output streams into its
+  own page and leaves the other steps' logs as they were.
 * **Problems**: errors and critical warnings from every step's log.
 * **Synthesis / Place & route options**: tabs beside the file list, one
   checkbox per tool option (unchecked leaves the tool's default), those that
