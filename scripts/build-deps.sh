@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build the tools the project files call, from the submodules under deps/.
 #
-#   scripts/build-deps.sh [tool ...]     tools: verilator yosys nextpnr fasm2netlist prjxray cudd sta ofl venv
+#   scripts/build-deps.sh [tool ...]     tools: verilator nextpnr fasm2netlist prjxray cudd sta ofl venv
 #                                        (default: all of them)
 #
 # Builds go under build-deps/ and install into build-deps/prefix where the
-# tool allows it.  verilator and yosys build in their own tree regardless (their
-# makefiles write bin/ and obj_* beside the sources), so .gitmodules marks
-# those checkouts ignore=dirty.  The flow's FASM-to-bitstream script is xc7/convert.py.
+# tool allows it.  verilator builds in its own tree regardless (its makefiles
+# write bin/ and obj_* beside the sources), so .gitmodules marks that checkout
+# ignore=dirty.  The flow's FASM-to-bitstream script is xc7/convert.py.
 # Project files refer to the results as {prefix} and {builds}.
 set -euo pipefail
 
@@ -38,21 +38,6 @@ verilator() {
     [ -f "$deps/verilator/configure" ] || (cd "$deps/verilator" && autoconf)
     [ -f Makefile ] || "$deps/verilator/configure" --prefix="$prefix"
     make -j"$jobs" && make install
-}
-
-yosys() {
-    say yosys
-    git -C "$deps/yosys" submodule update --init --recursive
-    # a plain `make` here: the repository target uses nproc, which macOS lacks
-    local extra=()
-    if [ "$(uname -s)" = Darwin ]; then
-        extra=(CONFIG=clang ENABLE_TCL=0 ENABLE_READLINE=0 ENABLE_EDITLINE=0 ENABLE_PLUGINS=0
-               ENABLE_LIBYOSYS=0 ENABLE_ABC=1 PREFIX="$prefix")
-        # in the environment, not on the command line: the makefile appends its own -I. to these
-        export CXXFLAGS="-I$(brew --prefix libffi)/include" LINKFLAGS="-L$(brew --prefix libffi)/lib"
-    fi
-    make -C "$deps/yosys" -j"$jobs" "${extra[@]}"
-    test -x "$deps/yosys/yosys"
 }
 
 prjxray() {
@@ -121,5 +106,5 @@ venv() {
 }
 
 tools=("$@")
-[ ${#tools[@]} -gt 0 ] || tools=(verilator yosys prjxray nextpnr fasm2netlist sta ofl venv)
+[ ${#tools[@]} -gt 0 ] || tools=(verilator prjxray nextpnr fasm2netlist sta ofl venv)
 for t in "${tools[@]}"; do ( "$t" ); done

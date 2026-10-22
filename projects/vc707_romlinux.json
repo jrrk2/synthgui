@@ -103,7 +103,6 @@
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/vc707_romlinux",
   "xdc": "{root}/projects/vc707_romlinux-src/xilinx_vc707.xdc",
-  "xilinx_stubs": "{deps}/yosys/share/xilinx/cells_sim.v {deps}/yosys/share/xilinx/cells_xtra.v",
-  "yosys": "{deps}/yosys/yosys",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
   "bram_fom_budget": "6100/5400"
 }

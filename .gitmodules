@@ -24,10 +24,6 @@
 	path = deps/prjxray
 	url = https://github.com/openXC7/prjxray.git
 	ignore = dirty
-[submodule "deps/yosys"]
-	path = deps/yosys
-	url = https://github.com/YosysHQ/yosys.git
-	ignore = dirty
 [submodule "deps/fasm2netlist"]
 	path = deps/fasm2netlist
 	url = https://github.com/jrrk2/fasm2netlist.git

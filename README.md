@@ -139,9 +139,13 @@ The tools the flow calls are submodules under `deps/`:
 | submodule | provides |
 | --- | --- |
 | `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog |
-| `yosys` | only its Xilinx primitive models (`cells_sim.v`, `cells_xtra.v`): Verilator's cell stubs, and what the mapped Verilog simulates against.  Nothing runs yosys. |
 | `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; `xc7/convert.py` drives prjxray |
 | `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
+
+The Xilinx primitive models Verilator reads as cell stubs, and that the
+mapped Verilog simulates against, are `xc7/cells_sim.v` and
+`xc7/cells_xtra.v`: yosys's (ISC licence, kept in their headers), copied in
+so that the flow needs no yosys at all.
 | `prjxray-db` | segbits database (large) |
 | `OpenSTA` | `sta` |
 | `openFPGALoader` | programming |

@@ -75,6 +75,5 @@
     "verilator_root": "{prefix}/share/verilator",
     "work": "~/synthgui-work/johnson",
     "xdc": "{root}/projects/johnson-src/top.xdc",
-    "xilinx_stubs": "{deps}/yosys/share/xilinx/cells_sim.v {deps}/yosys/share/xilinx/cells_xtra.v",
-    "yosys": "{deps}/yosys/yosys"
+    "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v"
 }
