@@ -18,7 +18,7 @@
 	ignore = dirty
 [submodule "deps/nextpnr"]
 	path = deps/nextpnr
-	url = https://github.com/openXC7/nextpnr.git
+	url = https://github.com/jrrk2/nextpnr.git
 	ignore = dirty
 [submodule "deps/prjxray"]
 	path = deps/prjxray

@@ -37,8 +37,9 @@ What it does today (stage one: every tool is a separate process):
 * **Synthesis / Place & route options**: tabs beside the file list, one
   checkbox per tool option (unchecked leaves the tool's default), those that
   change the quality of results first -- the LUT mapping script; placer,
-  timing weight, congestion spreading, delay model, timing optimisation,
-  router, rip-up, hold fixing, seed -- and the command line they make.  They
+  timing weight, congestion spreading, delay model, clock tree delay model,
+  block RAM placement, timing optimisation, router, rip-up, hold fixing,
+  seed -- and the command line they make.  They
   are kept in the project's `options` and become `{synth_options}` (appended
   to the synthesis command) and `{nextpnr_flags}`; a project from before them
   has its `nextpnr_flags` read back into options.  The list is `options.h`.
@@ -52,6 +53,28 @@ Next stages (not done): OpenSTA as a step (`virtex7.lib` from Vivado's SDK
 for the arcs, nextpnr's `--sdf` for the delays); the LVS mismatches and
 nextpnr's per-net timing as highlights on the plot; then the tools as shared
 libraries in one process sharing one netlist and one chip database.
+
+## Block RAM placement and its figure of merit
+
+nextpnr's report can say a design with deep memories meets timing when it
+does not: it gave every clock sink the same delay, so it saw no skew, and it
+spread a ROM's block RAMs to the edges of the die.  The ROM-Linux SoC
+(`projects/vc707_romlinux.json`) met 100 MHz by the report and read its ROM
+wrongly on the board.  deps/nextpnr (the `clock-tree-bram-place` branch) adds
+both fixes, on by default, as the Place & route panel's **Clock tree delay
+model** and **Block RAM placement by read-mux group**.
+
+The **Block RAM merit** step (`fom`, after Place & route) runs nextpnr's
+`.github/scripts/bram_fom.py` on the placement: each block RAM's worst
+estimated read path to the registers it feeds, from the placement alone.  The
+Timing tab shows its worst and 95th percentile against the project's
+`bram_fom_budget` ("worst/p95" in ps), and whether the two passes ran.  The
+ROM-Linux project's budget, 6100/5400, is where the board drew the line:
+every placement that read the ROM scored 5995 ps or less worst, the two that
+did not 6251 and 6961.  The margin is about 250 ps, so a FAIL says "try this
+one on the board", not "this one is broken".
+Without a delay matrix file in the Delay model the step uses nextpnr's
+fallback formula, whose scores are not comparable with a budget.
 
 ## OpenSTA step
 

@@ -76,7 +76,18 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "or a file that caches the measured table."},
         {"pnr.timing_opt", "Timing optimisation (radius,rounds)", OptionSpec::Text, "2,30", "-o timing-opt={}", true,
          "After placing, move cells on critical paths within this radius for this many rounds. "
-         "Needs a nextpnr with --timing-opt (xc7-bitstream-tools' timing-opt-radius-iterations)."},
+         "On the ROM-Linux SoC it undoes congestion spreading (91.58 MHz against 102.00)."},
+        {"pnr.clock_tree", "Clock tree delay model", OptionSpec::Choice, "on", "-o clock-tree={}", true,
+         "Add the global clock tree's insertion delay to every clock sink, so placement and timing see the "
+         "skew across the die (nextpnr reports none without it).  On (the default) only where the die's "
+         "clock delays are measured (xc7vx485t); force borrows the xc7vx485t's elsewhere.",
+         "on|On (measured dies)\noff|Off: flat clock delay\nforce|Force: xc7vx485t rates on any die"},
+        {"pnr.bram_place", "Block RAM placement by read-mux group", OptionSpec::Choice, "on", "-o bram-place={}",
+         true,
+         "After placing, group the block RAMs by the read multiplexers their outputs feed, place each group "
+         "together next to the registers it reaches, and place everything else again around them.  What "
+         "makes a deep ROM read correctly on the board; about doubles placement time.",
+         "on|On (the default)\noff|Off"},
         {"pnr.router", "Router", OptionSpec::Choice, "router2", "--router {}", true,
          "router2 is the faster, congestion-negotiating router.", "router2|router2\nrouter1|router1"},
         {"pnr.tmg_ripup", "Timing-driven rip-up", OptionSpec::Bool, "1", "--tmg-ripup", true,

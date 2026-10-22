@@ -156,6 +156,8 @@ struct Project {
         vars["sdf"] = work + "/" + top + ".sdf";
         if (!vars.contains("sta_prep"))  // sta/ next to build/
             vars["sta_prep"] = QDir(QCoreApplication::applicationDirPath() + "/../sta").absoluteFilePath("nextpnr_sta.py");
+        if (!vars.contains("bram_fom"))  // the block RAM figure of merit, from nextpnr's CI
+            vars["bram_fom"] = repoRoot() + "/deps/nextpnr/.github/scripts/bram_fom.py";
         vars["xdc"] = xdc;
         // commands run through bash: quote anything the shell would read (32'h... in a define)
         auto q = [](const QString& w) {
@@ -178,6 +180,11 @@ struct Project {
     void applyOptions() {
         vars["synth_options"] = expandHome(optionArgs("synth", options));
         vars["nextpnr_flags"] = expandHome(optionArgs("pnr", options));
+        // the figure of merit prices routes with the placer's delay matrix: the
+        // file when the Delay model names one, else nextpnr's fallback formula
+        const QString dm = options.value("pnr.delay_matrix");
+        const bool dm_is_a_file = !dm.isEmpty() && dm != "build" && dm != "off";
+        vars["delay_matrix_file"] = dm_is_a_file ? expandHome(dm) : "formula";
     }
     // Write the options back into the project file, leaving the rest of it as it is
     bool saveOptions(QString& err) const {
@@ -1259,6 +1266,50 @@ private:
             m_timing->resizeColumnsToContents();
             parseStaPaths(sta);
         }
+        // The P&R passes that decide a deep memory's timing, from their log lines
+        auto infoRow = [&](const QString& what, const QString& value, const QString& status, bool good) {
+            const int r = m_timing->rowCount();
+            m_timing->insertRow(r);
+            m_timing->setItem(r, 0, new QTableWidgetItem(what));
+            m_timing->setItem(r, 1, new QTableWidgetItem(value));
+            m_timing->setItem(r, 2, new QTableWidgetItem(QString()));
+            auto* st = new QTableWidgetItem(status);
+            st->setForeground(good ? QColor(0x20, 0x80, 0x20) : QColor(0xc0, 0x20, 0x20));
+            QFont f = st->font();
+            f.setBold(true);
+            st->setFont(f);
+            m_timing->setItem(r, 3, st);
+            return r;
+        };
+        static const QRegularExpression ct("clock-tree: ([^,\\n]+)");
+        static const QRegularExpression bp("bram-place: (\\d+) block RAMs in (\\d+) read-mux groups");
+        const auto ctm = ct.match(pnr);
+        if (ctm.hasMatch()) {
+            const bool modelled = !ctm.captured(1).startsWith("no ");  // "no clock delays measured for <die>"
+            infoRow("clock tree model", modelled ? ctm.captured(1) : "not measured for this die",
+                    modelled ? "ON" : "OFF", modelled);
+        }
+        const auto bpm = bp.match(pnr);
+        if (bpm.hasMatch())
+            infoRow("block RAM placement", bpm.captured(1) + " in " + bpm.captured(2) + " groups", "ON", true);
+        // The block RAM figure of merit (the fom step, bram_fom.py): each block
+        // RAM's worst estimated read path to the registers it feeds, from the
+        // placement alone, against the project's budget ("bram_fom_budget":
+        // "worst/p95" in ps, where the board showed the line)
+        const QString fom = readAll(m_p.logPath("fom"));
+        static const QRegularExpression fr("^(\\S+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)",
+                                           QRegularExpression::MultilineOption);
+        const auto fm = fr.match(fom);
+        if (fm.hasMatch()) {
+            const QStringList budget = m_p.vars.value("bram_fom_budget").split('/');
+            const bool judged = budget.size() == 2;
+            const bool ok = judged && fm.captured(2).toDouble() <= budget[0].toDouble() &&
+                            fm.captured(3).toDouble() <= budget[1].toDouble();
+            const int r = infoRow("block RAM read paths, worst / p95 (ps)", fm.captured(2) + " / " + fm.captured(3),
+                                  judged ? (ok ? "PASS" : "FAIL") : "-", ok || !judged);
+            if (judged) m_timing->item(r, 2)->setText(budget[0] + " / " + budget[1]);
+        }
+        m_timing->resizeColumnsToContents();
         fillPathClocks();
         QSet<QString> hot;
         static const QRegularExpression rep("Critical path report for clock '([^']+)'");

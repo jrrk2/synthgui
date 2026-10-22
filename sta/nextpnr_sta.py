@@ -78,7 +78,23 @@ def fix_sdf(text, inst_variant):
         v = inst_variant.get(i.group(1).strip().replace("\\", ""), t)
         return body.replace('CELLTYPE "%s"' % t, 'CELLTYPE "%s"' % v, 1)
     parts = re.split(r"(\n  \(CELL\n)", text)
-    return "".join(one(x) if k % 2 == 0 else x for k, x in enumerate(parts))
+    return escape_dividers("".join(one(x) if k % 2 == 0 else x for k, x in enumerate(parts)))
+
+def escape_dividers(text):
+    """nextpnr names cells with '/' in them (a LUTRAM's storage_0_.../DP, the
+    packer's x$LUT$... carries) and writes them unescaped, but '/' is SDF's
+    hierarchy divider: read_sdf looks for an instance DP inside storage_0_...
+    and skips the cell.  Escape every '/' of an INSTANCE name, and every one
+    but the pin divider (the last) of an INTERCONNECT pin."""
+    unescaped = re.compile(r"(?<!\\)/")
+    def path(p, keep_last):
+        if not keep_last:
+            return unescaped.sub(r"\/", p)
+        head, sep, pin = p.rpartition("/")
+        return (unescaped.sub(r"\/", head) + sep + pin) if sep else p
+    text = re.sub(r"\(INSTANCE ([^)]+)\)", lambda m: "(INSTANCE %s)" % path(m.group(1).strip(), False), text)
+    return re.sub(r"\(INTERCONNECT (\S+) (\S+) ",
+                  lambda m: "(INTERCONNECT %s %s " % (path(m.group(1), True), path(m.group(2), True)), text)
 
 def scalar(v):
     return '(scalar) { values("%.4f"); }' % v
