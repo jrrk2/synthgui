@@ -1,0 +1,124 @@
+{
+  "blackboxes": [
+    "BUFG",
+    "FDCE",
+    "GTXE2_CHANNEL",
+    "IBUFDS",
+    "IBUFDS_GTE2",
+    "MMCME2_ADV",
+    "RAMB36E1"
+  ],
+  "capacity": {
+    "BUFG": 32,
+    "DSP": 2800,
+    "FF": 607200,
+    "IO": 700,
+    "LUT": 303600,
+    "LUTRAM": 130800,
+    "RAMB36": 1030
+  },
+  "convert": "{root}/xc7/convert.py",
+  "defines": [
+    "SYNTHESIS",
+    "CORE_SB=0",
+    "SYS_DIV=40.000",
+    "CLK_HZ=25000000"
+  ],
+  "device": "xc7vx485t",
+  "incdirs": [
+    "{root}/projects/cdc6000_eth-src"
+  ],
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "name": "cdc6000 with Ethernet (NFS, shell)",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "part": "xc7vx485tffg1761-2",
+  "prjxray_db": "{deps}/prjxray-db",
+  "python": "{builds}/venv/bin/python",
+  "sources": [
+    "{root}/projects/cdc6000_eth-src/cdc_pkg.sv",
+    "{root}/projects/cdc6000_eth-src/cdc6000_core.sv",
+    "{root}/projects/cdc6000_eth-src/cdc6000_sb.sv",
+    "{root}/projects/cdc6000_eth-src/cdc_ram_bram.v",
+    "{root}/projects/cdc6000_eth-src/cdc_disk_bram.v",
+    "{root}/projects/cdc6000_eth-src/cdc_eth_core.v",
+    "{root}/projects/cdc6000_eth-src/simpleuart.v",
+    "{root}/projects/cdc6000_eth-src/liteeth_sgmii_phy.v",
+    "{root}/projects/cdc6000_eth-src/rgmii_lfsr.sv",
+    "{root}/projects/cdc6000_eth-src/axis_gmii_rx.sv",
+    "{root}/projects/cdc6000_eth-src/axis_gmii_tx.sv",
+    "{root}/projects/cdc6000_eth-src/eth_mac_1g.sv",
+    "{root}/projects/cdc6000_eth-src/eth_lutram_fifo.sv",
+    "{root}/projects/cdc6000_eth-src/eth_stream_dma.sv",
+    "{root}/projects/cdc6000_eth-src/eth_gmii_retime256.sv",
+    "{root}/projects/cdc6000_eth-src/eth_pkt_buf256.sv",
+    "{root}/projects/cdc6000_eth-src/sgmii_soc_liteeth.sv",
+    "{root}/projects/cdc6000_eth-src/clkgen_vc707.sv",
+    "{root}/projects/cdc6000_eth-src/vc707_cdc_eth.v"
+  ],
+  "srcdir": "{root}/projects/cdc6000_eth-src",
+  "sta": "{prefix}/bin/sta",
+  "steps": [
+    {
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
+      "id": "synth",
+      "label": "Synthesize"
+    },
+    {
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}",
+      "id": "pnr",
+      "label": "Place & Route"
+    },
+    {
+      "id": "fom",
+      "label": "Block RAM merit",
+      "command": "{python} {bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+    },
+    {
+      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "id": "sta",
+      "label": "OpenSTA"
+    },
+    {
+      "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {lvs_equiv} --gold {json} --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --db {prjxray_db}/{family} --device {device} --quiet",
+      "id": "lvs",
+      "label": "LVS"
+    },
+    {
+      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}",
+      "id": "bit",
+      "label": "Bitstream"
+    },
+    {
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}",
+      "id": "program",
+      "label": "Program"
+    }
+  ],
+  "top": "vc707_cdc_eth",
+  "verilator": "{prefix}/bin/verilator",
+  "verilator_root": "{prefix}/share/verilator",
+  "work": "~/synthgui-work/cdc6000_eth",
+  "xdc": "{root}/projects/cdc6000_eth-src/vc707_cdc_nextpnr.xdc",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
+  "options": {
+    "pnr.router": "router2",
+    "pnr.allow_fail": "1",
+    "pnr.hold_fix": "8",
+    "pnr.timingweight": "60",
+    "pnr.delay_matrix": "off",
+    "pnr.clock_tree": "on",
+    "pnr.bram_place": "on",
+    "pnr.cong_spread": "1",
+    "synth.warn.WIDTHTRUNC": "1",
+    "synth.warn.WIDTHEXPAND": "1",
+    "synth.warn.MULTIDRIVEN": "1",
+    "synth.warn.BLKANDNBLK": "1",
+    "synth.warn.PINMISSING": "1",
+    "synth.warn.UNOPTFLAT": "1",
+    "synth.warn.TIMESCALEMOD": "1",
+    "synth.warn.SPECIFYIGN": "1"
+  },
+  "family": "virtex7"
+}
