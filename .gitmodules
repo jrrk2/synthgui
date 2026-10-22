@@ -8,7 +8,7 @@
 	url = https://github.com/openXC7/prjxray-db.git
 [submodule "deps/OpenSTA"]
 	path = deps/OpenSTA
-	url = https://github.com/The-OpenROAD-Project/OpenSTA.git
+	url = https://github.com/jrrk2/OpenSTA.git
 [submodule "deps/openFPGALoader"]
 	path = deps/openFPGALoader
 	url = https://github.com/trabucayre/openFPGALoader.git
