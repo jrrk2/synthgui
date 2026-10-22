@@ -22,9 +22,20 @@ protocol in `vc707_cdc_top.v`'s header), which a terminal shows as garbage.
 memory, so it runs once per configuration), sends the source, and prints the
 listing and the halt record.
 
-    projects/cdc6000-src/cdcrun.py projects/cdc6000-src/hello.pas \
-        --bit ~/synthgui-work/cdc6000/vc707_cdc_top.bit \
-        --loader build-deps/prefix/bin/openFPGALoader
+    make -C projects/cdc6000-src hello       # compile hello.pas on the board
+    make -C projects/cdc6000-src selfhost    # compile the compiler, check the fixed point
+
+`make selfhost` has the board compile the compiler's source (the cdc6000
+repository's host/pascal.cdc; CDC= names the repository), checks that its
+pasclgo.out and pmdfile.out are bit for bit what the repository's emulator
+writes from the same memory image, and builds a compiler from the board's
+pasclgo.out and checks it is word for word the compiler that ran.  The
+build needs the compile's parameter list, which this board design cannot
+read back from its memory; the repository's stage2 copy is used, and the
+emulator's memory dump of the same compile gives the same one.  On the
+synthgui-built bitstream: 34799506 instructions in 130.2 M cycles (5.2 s at
+25 MHz, about 20 s with the UART), 12653 + 808 words identical, 12607
+compiler words identical: the self-hosting fixed point.
 
 Built by synthgui's flow (Verilator, nextpnr with the clock-tree model and
 block RAM placement, LVS 22233 proved and 0 differing), it compiles

@@ -50,6 +50,9 @@ def main():
     ap.add_argument("--bit", help="reprogram the FPGA with this bitstream first")
     ap.add_argument("--loader", default="openFPGALoader")
     ap.add_argument("--timeout", type=float, default=120)
+    ap.add_argument("--save", help="write each binary file here as <name>.out, one 20-digit octal word a line "
+                                   "(the emulator's -d format)")
+    ap.add_argument("--listing", help="write the listing to this file rather than printing it")
     a = ap.parse_args()
 
     data = encode(open(a.source).read())
@@ -61,6 +64,7 @@ def main():
 
     sent, allowed, waiting = 0, 1024, False
     files, line = {}, []
+    listing = open(a.listing, "w") if a.listing else sys.stdout
     deadline = time.time() + a.timeout
     pending = bytearray()
 
@@ -83,8 +87,8 @@ def main():
         while pending:
             b = take(1)[0]
             if b < 0x40:
-                if b == 0 and line:
-                    print("".join(line).rstrip())
+                if b == 0:
+                    print("".join(line).rstrip(), file=listing)
                     line = []
                 elif b:
                     line.append(TO_ASCII[b])
@@ -93,16 +97,22 @@ def main():
             elif b == 0x83:
                 allowed += 256
             elif b == 0x81:
-                name = take(8).decode("ascii", "replace").strip()
-                files.setdefault(name, []).append(int.from_bytes(take(8), "big"))
+                # the name is a 60-bit word, ten display-code characters, left justified
+                nv = int.from_bytes(take(8), "big")
+                name = "".join(TO_ASCII[(nv >> (54 - 6 * i)) & 63] for i in range(10) if (nv >> (54 - 6 * i)) & 63)
+                files.setdefault(name.lower(), []).append(int.from_bytes(take(8), "big"))
             elif b == 0x82:
                 if line:
-                    print("".join(line).rstrip())
+                    print("".join(line).rstrip(), file=listing)
                 icount = int.from_bytes(take(8), "big")
                 cycles = int.from_bytes(take(8), "big")
                 fault = take(1)[0]
                 for name, words in files.items():
                     print("file %s: %d words" % (name, len(words)))
+                    if a.save:
+                        with open("%s/%s.out" % (a.save, name), "w") as f:
+                            for w in words:
+                                f.write("%020o\n" % (w & ((1 << 60) - 1)))
                 print("halted: %d instructions in %d cycles (%.2f per cycle), fault %d"
                       % (icount, cycles, icount / max(cycles, 1), fault))
                 sys.exit(1 if fault else 0)
