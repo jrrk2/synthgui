@@ -70,15 +70,20 @@ images/kernel.bin: images/stub.bin $(LINUX)/arch/riscv/boot/Image
 images/rootfs.romfs: tools/romfs_add.py $(ROOTFS_BASE)
 	python3 -I tools/romfs_add.py $(ROOTFS_BASE) $@
 
+# Sizes come from the files: flash_write needs the exact length, flash_erase_range the length rounded up to the
+# 64 KB erase sector, and mem_cmp counts 32-bit words.
 flash:
 	@echo "tools/tftpd.py <dir containing the images> serves TFTP on this machine (the DIP switches select the server"
 	@echo "by its last octet). At the BIOS prompt (press ESC at the boot countdown):"
-	@echo "  tftpget kernel.bin 0x40000000"
-	@echo "  flash_erase_range 0x0 0x3A0000"
-	@echo "  flash_write 0x0 0x40000000 $$(stat -c%s images/kernel.bin)"
-	@echo "  tftpget rootfs.romfs 0x40000000"
-	@echo "  flash_erase_range 0x5C0000 0x90000"
-	@echo "  flash_write 0x5C0000 0x40000000 $$(stat -c%s images/rootfs.romfs)"
+	@for f in kernel.bin:0x0:0x02000000 rootfs.romfs:0x5C0000:0x025C0000; do \
+	  name=$${f%%:*}; rest=$${f#*:}; off=$${rest%%:*}; map=$${rest#*:}; \
+	  size=$$(wc -c < images/$$name | tr -d ' '); \
+	  erase=$$(printf '0x%x' $$(( ($$size + 0xffff) / 0x10000 * 0x10000 ))); \
+	  echo "  tftpget $$name 0x40000000          # must print: loaded $$size bytes"; \
+	  echo "  flash_erase_range $$off $$erase"; \
+	  echo "  flash_write $$off 0x40000000 $$size"; \
+	  echo "  mem_cmp $$map 0x40000000 $$(( $$size / 4 ))   # words; must print: same content"; \
+	done
 	@echo "  reboot        # boots Linux from flash with no network"
 
 clean:

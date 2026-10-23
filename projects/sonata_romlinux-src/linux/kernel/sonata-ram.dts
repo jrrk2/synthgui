@@ -9,7 +9,7 @@
 
 
         chosen {
-            bootargs = "console=liteuart earlycon=liteuart,0xf0001000 root=mtd:rootfs rootfstype=romfs ro init=/sbin/init panic=5 loglevel=8";
+            bootargs = "console=liteuart earlycon=liteuart,0xf0001000 root=mtd:rootfs rootfstype=romfs ro init=/sbin/init ip=dhcp panic=5 loglevel=8";
         };
 
         sys_clk: clock-50000000 {

@@ -4,13 +4,14 @@
     L=<litex-deps>   (migen, litex, litespi and pythondata-cpu-vexriscv-smp on PYTHONPATH)
     PYTHONPATH=$L/migen:$L/litex:$L/litespi:$L/pythondata-cpu-vexriscv-smp python3.12 gen_soc.py --output-dir build
 
-  ROM  0x80000000  W25Q256 quad SPI flash on the appspi pins, read in place (litespi memory map).
+  ROM  0x02000000  W25Q256 quad SPI flash on the appspi pins, read in place (litespi memory map).
   RAM  0x40000000  8 MB W956 HyperRAM, through LiteX's 4:1 SDR HyperRAM core (fabric flops and tri-states
                    only, so the open flow can place it; the same core as projects/sonata-lib/hyperram.v).
   A small boot ROM (the BIOS) and 6 KB of SRAM stay in block RAM.
 
 Derived from the lowRISC Sonata LiteX target (litex-boards lowrisc_sonata, jrrk2/sonata-linux) with the Vivado
-specifics removed: no ODDR/IDDR, no 2x clock, no JTAG TAP, no SPI Ethernet.  The system clock is 50 MHz, which
+specifics removed: no ODDR/IDDR, no 2x clock, no JTAG TAP. Added: the KSZ8851 SPI Ethernet, DIP switches,
+and the LCD text console.  The system clock is 50 MHz, which
 keeps the sonata-linux device tree (50 MHz timebase), kernel and flash image usable unchanged; the HyperRAM
 clock is therefore 12.5 MHz.
 """
