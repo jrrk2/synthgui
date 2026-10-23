@@ -48,7 +48,7 @@ images/sonata-ram.dtb: kernel/sonata-ram.dts
 
 $(LINUX)/.git:
 	mkdir -p $(LINUX) && cd $(LINUX) && git init -q && git remote add origin $(KERNEL_URL)
-	cd $(LINUX) && git fetch -q --depth 1 origin $(KERNEL_REV) && git checkout -q FETCH_HEAD
+	cd $(LINUX) && git -c http.version=HTTP/1.1 fetch -q --depth 1 origin $(KERNEL_REV) && git checkout -q FETCH_HEAD
 
 $(LINUX)/arch/riscv/boot/Image: $(LINUX)/.git images/sonata-ram.dtb kernel/ram-additions.config $(wildcard kernel/drivers/*/*.c kernel/drivers/*/*/*/*/*.[ch])
 	cp -r kernel/drivers/* $(LINUX)/drivers/
