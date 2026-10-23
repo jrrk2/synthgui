@@ -1,6 +1,6 @@
 import argparse, struct, sys
 ap = argparse.ArgumentParser(description="Build a romfs image: from an existing one (src) or from nothing (src = -), "
-                             "plus /sbin/init and whatever the options add")
+                             "plus whatever the options add")
 ap.add_argument("src", help="romfs image to start from, or - for an empty one"); ap.add_argument("dst")
 ap.add_argument("--dir", action="append", default=[], metavar="PATH", help="add an empty directory")
 ap.add_argument("--dev", action="append", default=[], metavar="PATH=c:MAJOR:MINOR", help="add a character device node")
@@ -75,7 +75,7 @@ if args.busybox:
 if args.links:
     for line in open(args.links).read().split():
         p = line if line.startswith("/") else "/" + line
-        if p not in ("/bin/busybox", "/sbin/init"):
+        if p != "/bin/busybox":
             put(p, 3, b'/bin/busybox')
 import os
 for spec in args.tree:
@@ -99,23 +99,6 @@ for spec in args.file:
 if args.udhcpc_script:
     put("/usr/share/udhcpc/default.script", 2, open(args.udhcpc_script, 'rb').read(), 8)
 
-ensure_dir('/sbin')
-sb=[e for e in root if e['name']==b'sbin'][0]
-assert not any(k['name']==b'init' for k in sb['kids'])
-sb['kids'].append(dict(name=b'init',typ=2,exe=8,spec=0,data=b'''#!/bin/sh
-PATH=/bin:/sbin
-# devtmpfs is already mounted by the kernel
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t tmpfs -o size=2m tmpfs /tmp
-echo "========================================"
-echo "  Sonata Linux - LiteX VexRiscv RV32IMAC"
-echo "  MMU, single hart, 8 MB HyperRAM"
-echo "========================================"
-uname -a
-echo
-exec /bin/sh
-'''))
 def pad(b): return b+b'\0'*(-len(b)%16)
 def size_of(entries):
     t=0

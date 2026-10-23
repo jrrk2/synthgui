@@ -1,3 +1,4 @@
-# sourced by login shells; /sbin/init has already set PATH for the console shell
-PATH=/bin:/sbin:/usr/bin:/usr/sbin
-PS1="sonata# "
+# read by the login shell that init starts
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PS1='sonata# '
+export HOME=/root

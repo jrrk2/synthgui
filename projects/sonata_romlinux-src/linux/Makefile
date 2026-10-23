@@ -130,15 +130,13 @@ build/tccroot/usr/bin/tcc: $(TCC)/tcc tools/stage_tcc.py
 	python3 tools/stage_tcc.py --tinycc $(TCC) --sysroot $(SYSROOT) --libgcc "$$(build/rv32-gcc -print-libgcc-file-name)" \
 	  --gcc $(CURDIR)/build/rv32-gcc --strip $(CROSS)strip --out build/tccroot
 
-# The base romfs has no /sbin/init (this busybox has no init applet): tools/romfs_add.py adds a shell-script init
-# that mounts /proc and /sys and starts a shell, replaces /bin/busybox with the one built above, links every applet
-# to it and installs the udhcpc script.
 # also writes rtl/lcd_fb_ram.v, the LCD frame buffer RAM with the logo as its initial contents (needs a new bitstream)
 images/sonata-logo.rgb565: tools/gen_logo.py ../../sonata-lib/font8x8_basic.h
 	python3 tools/gen_logo.py $@ ../rtl
 
 # The root filesystem is defined here and in userland/skeleton: directories, device nodes, /etc, BusyBox + musl,
-# tcc and the examples, /sbin/init (a script made by tools/romfs_add.py, which mounts /proc, /sys and a tmpfs /tmp).
+# tcc and the examples. /sbin/init is BusyBox's init: userland/skeleton/etc/inittab and init.d/rcS (mounts /proc, /sys
+# and a tmpfs /tmp) and a login shell on the serial console with a controlling terminal, so Ctrl-C works.
 images/rootfs.romfs: tools/romfs_add.py $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo userland/fbget userland/cc \
 	  build/tccroot/usr/bin/tcc $(wildcard userland/examples/*) $(wildcard userland/skeleton/etc/*)
 	python3 -I tools/romfs_add.py - $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \

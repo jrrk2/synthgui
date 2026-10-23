@@ -1,1 +1,8 @@
-::respawn:-/bin/sh
+# BusyBox init: set up the system once, then keep a login shell on the serial console. Naming a device in the first
+# field makes init open it as the shell's controlling terminal, so Ctrl-C and job control work; "console" is /dev/console,
+# which always exists (a static node in the image) and is redirected by the kernel to the real console. (Naming
+# ttyLXU0 did not work on the board: that node was not there.)
+::sysinit:/etc/init.d/rcS
+console::respawn:-/bin/sh
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r

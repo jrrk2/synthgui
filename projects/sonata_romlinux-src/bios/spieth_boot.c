@@ -639,9 +639,27 @@ static uint32_t tflash_fill = 0;
 static uint32_t tflash_total = 0;
 static int tflash_err = 0;
 
+static uint32_t tflash_skipped = 0;   // bytes left alone because the flash already held them
+
+// Is the flash block at offset off already what is staged?  The flash is memory mapped (a read of a 64 KB block
+// takes ~20 ms), erasing and writing it takes over a second, and most of a rebuilt image is unchanged.
+static int tflash_same(uint32_t off) {
+  volatile const uint32_t *f = (volatile const uint32_t *)(0x02000000UL + off);
+  const uint32_t *s = (const uint32_t *)TFLASH_STAGE;
+  for (uint32_t i = 0; i < TFLASH_BLOCK / 4; i++)
+    if (f[i] != s[i]) return 0;
+  return 1;
+}
+
 static void tflash_flush(void) {
   if (tflash_fill == 0 || tflash_err) return;
   memset(TFLASH_STAGE + tflash_fill, 0xff, TFLASH_BLOCK - tflash_fill);
+  if (tflash_same(tflash_off)) {
+    tflash_skipped += TFLASH_BLOCK;
+    tflash_off += TFLASH_BLOCK;
+    tflash_fill = 0;
+    return;
+  }
   spiflash_erase_range(tflash_off, TFLASH_BLOCK);
   if (spiflash_write_stream(tflash_off, TFLASH_STAGE, TFLASH_BLOCK) != TFLASH_BLOCK) {
     printf("tftpflash: write/verify failed at 0x%08lx\n", (unsigned long)tflash_off);
@@ -929,9 +947,10 @@ static void rx_poll(void) {
                   tflash_flush();
                   tftp_state = TFTP_DONE;
                   if (!tflash_err)
-                    printf("tftpflash: %ld bytes written and verified at flash 0x%08lx..0x%08lx\n", (long)tftp_offset,
+                    printf("tftpflash: %ld bytes written and verified at flash 0x%08lx..0x%08lx (%lu KB unchanged, skipped)\n",
+                      (long)tftp_offset,
                       (unsigned long)(tflash_off - ((tflash_total + TFLASH_BLOCK - 1) / TFLASH_BLOCK) * TFLASH_BLOCK),
-                      (unsigned long)tflash_off);
+                      (unsigned long)tflash_off, (unsigned long)(tflash_skipped / 1024));
                 }
                 continue;
               }
@@ -980,7 +999,7 @@ void spieth_tftp_boot(void) {
 #ifdef CSR_SPIFLASH_MASTER_CS_ADDR
 void spieth_tftp_flash(const char *fn, unsigned long flash_off) {
   tftp_fn = fn; tftp_noboot = 1;
-  tftp_flash = 1; tflash_off = flash_off; tflash_fill = 0; tflash_total = 0; tflash_err = 0;
+  tftp_flash = 1; tflash_off = flash_off; tflash_fill = 0; tflash_total = 0; tflash_err = 0; tflash_skipped = 0;
   spieth_tftp_run();
   tftp_flash = 0;
 }
