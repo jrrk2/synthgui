@@ -140,13 +140,13 @@ images/sonata-logo.rgb565: tools/gen_logo.py ../../sonata-lib/font8x8_basic.h
 # tcc and the examples. /sbin/init is BusyBox's init: userland/skeleton/etc/inittab and init.d/rcS (mounts /proc, /sys
 # and a tmpfs /tmp) and a login shell on the serial console with a controlling terminal, so Ctrl-C works.
 images/rootfs.romfs: tools/romfs_add.py $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo userland/fbget userland/cc \
-	  build/tccroot/usr/bin/tcc $(wildcard userland/examples/*) $(wildcard userland/skeleton/etc/*)
+	  build/tccroot/usr/bin/tcc $(wildcard userland/src/*) $(wildcard userland/skeleton/etc/*)
 	python3 -I tools/romfs_add.py - $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \
 	  --dir /tmp --dir /proc --dir /sys --dir /dev --dir /root --dir /mnt --dir /usr/sbin --dir /var \
 	  --dev /dev/console=c:5:1 --dev /dev/null=c:1:3 --dev /dev/zero=c:1:5 --dev /dev/tty=c:5:0 --dev /dev/fb0=c:29:0 \
 	  --udhcpc-script $(BB)/examples/udhcp/simple.script \
 	  --file /usr/share/sonata-logo.rgb565=images/sonata-logo.rgb565 --file /usr/bin/showlogo=userland/showlogo:x \
-	  --file /usr/bin/fbget=userland/fbget:x --file /usr/bin/cc=userland/cc:x --tree build/tccroot=/ --tree userland/examples=/usr/share/examples \
+	  --file /usr/bin/fbget=userland/fbget:x --file /usr/bin/cc=userland/cc:x --tree build/tccroot=/ --tree userland/src=/usr/src \
 	  --tree userland/skeleton=/ --symlink /etc/resolv.conf=/proc/net/pnp
 
 # The BIOS command tftpflash streams a TFTP file into the flash (it erases, writes and verifies one 64 KB block at a

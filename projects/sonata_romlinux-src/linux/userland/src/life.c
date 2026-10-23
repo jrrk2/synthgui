@@ -1,4 +1,4 @@
-/* life.c -- Conway's Game of Life on a 160x128 torus.   tcc -static life.c -o /tmp/life && /tmp/life [generations] */
+/* life.c -- Conway's Game of Life on a 160x128 torus.   build.sh # or: tcc -static life.c -o /tmp/life && /tmp/life [generations] */
 #include "gfx.h"
 
 static uint8_t cur[GFX_H][GFX_W], nxt[GFX_H][GFX_W];

@@ -90,9 +90,13 @@ examples. `cc file.c -o /tmp/prog` is `tcc -static`; the board has a static C li
 (a 2 MB tmpfs); the root filesystem is read-only. A small program takes about 50 seconds to compile on the 50 MHz
 soft core, so keep programs small.
 
-* `/usr/share/examples/` has `gfx.h` (a header-only library for the 160x128 LCD: `gfx_pixel`, `gfx_line`, `gfx_rect`,
+* `/usr/src/` has `gfx.h` (a header-only library for the 160x128 LCD: `gfx_pixel`, `gfx_line`, `gfx_rect`,
   `gfx_circle`, `gfx_text` with an 8x8 font, `gfx_flip` to send the frame) and the demos `hello.c`, `plasma.c`, `mandel.c`,
-  `life.c` and `fbview.c`. Try `cp /usr/share/examples/* /tmp; cd /tmp; cc plasma.c -o plasma; ./plasma`. Opening
+  `life.c` and `fbview.c`. `/usr/src/build.sh` compiles every program there into `/tmp` (or `build.sh hello plasma` just those; `OUT=dir` changes the
+  destination); then run `/tmp/hello`, `/tmp/plasma 60`. The binaries are gone after a reboot, so run it again.
+  `fbview FILE [seconds]` shows a raw 160x128 RGB565 frame (40960 bytes) and needs a file name, or `-` for standard input;
+  without one it waits for input from the terminal. Try `fbview /usr/share/sonata-logo.rgb565 10`, or
+  `wget -q -O - http://192.168.1.169:8000/frame.raw.gz | zcat | fbview - 10`. Opening
   `/dev/fb0` hides the text console while the program runs.
 * Ready-made pictures: `tools/img2fb.py picture.png frame.raw [--gz] [--stretch]` (Pillow for PNG/JPEG, plain PPM
   without it) makes a raw 160x128 RGB565 frame; serve it from the PC (`python3 -m http.server 8000`) and on the board run

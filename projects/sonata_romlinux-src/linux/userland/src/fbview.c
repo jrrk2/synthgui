@@ -1,5 +1,5 @@
 /* fbview.c -- show a raw 160x128 RGB565 image (40960 bytes; a gzip copy works with zcat) from a file or stdin.
- * tcc -static fbview.c -o /tmp/fbview && /tmp/fbview image.raw [seconds]
+ * build.sh # or: tcc -static fbview.c -o /tmp/fbview && /tmp/fbview image.raw [seconds]
  * wget -q -O - http://host/image.raw | /tmp/fbview - 10                                                    */
 #include "gfx.h"
 

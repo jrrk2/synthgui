@@ -1,4 +1,4 @@
-/* plasma.c -- animated plasma (integer maths only).   tcc -static plasma.c -o /tmp/plasma && /tmp/plasma [frames] */
+/* plasma.c -- animated plasma (integer maths only).   build.sh # or: tcc -static plasma.c -o /tmp/plasma && /tmp/plasma [frames] */
 #include "gfx.h"
 
 int main(int argc, char **argv)

@@ -1,5 +1,5 @@
 /* mandel.c -- Mandelbrot set in 16.16 fixed point, bright palette, drawn a band at a time.
- * tcc -static mandel.c -o /tmp/mandel && /tmp/mandel [max_iterations]            */
+ * build.sh # or: tcc -static mandel.c -o /tmp/mandel && /tmp/mandel [max_iterations]            */
 #include "gfx.h"
 
 int main(int argc, char **argv)

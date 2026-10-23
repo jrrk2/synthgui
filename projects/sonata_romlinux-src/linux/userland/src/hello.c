@@ -1,4 +1,4 @@
-/* hello.c -- text, lines and shapes on the LCD.   tcc -static hello.c -o /tmp/hello && /tmp/hello */
+/* hello.c -- text, lines and shapes on the LCD.   build.sh # or: tcc -static hello.c -o /tmp/hello && /tmp/hello */
 #include "gfx.h"
 
 int main(void)
