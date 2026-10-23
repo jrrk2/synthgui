@@ -42,18 +42,22 @@ VexRiscv (MIT, generated with SpinalHDL, MIT). Neither is GPL.
 rewrites the romfs; it is a small Python program included here).
 
 `rootfs-base.romfs` is the busybox/iperf3 userland from the `sonata-linux` project (`github.com/jrrk2/sonata-linux`,
-`make rootfs` = `genromfs` of Buildroot's target directory, Buildroot external tree in
-`linux-on-litex-vexriscv/buildroot`, defconfig `litex_vexriscv_sonata_defconfig`). **It was supplied as a binary and
-was not built from this repository.** Its programs include BusyBox v1.36.1 (GPL-2.0-only; its banner reads
-`BusyBox v1.36.1 (2026-02-16 07:52:06 GMT)`), iperf3, `netbench` and `fb_fractal`. The complete source of those
-programs is the Buildroot package set used by that build: BusyBox 1.36.1 from `https://busybox.net/downloads/`, the
-Buildroot revision, defconfig and busybox config of the `sonata-linux` checkout that produced the file, and the
-other packages' tarballs. **What this repository does not record** is that checkout's exact revision and busybox
-configuration. The binary here is a static-PIE built with compressed instructions, while the
-`litex_vexriscv_sonata_defconfig` in the `sonata-linux` tree sets `BR2_RISCV_ISA_RVC=n`, so the configuration that built
-this file differs from that defconfig in some way that is not recorded here. Whoever distributes this repository
-must supply, or offer, that source (GPL-2.0 section 3); the maintainer who provided the file is the only one who
-has it.
+`make rootfs` = `genromfs` of Buildroot's target directory). **It was supplied as a binary and was not built from
+this repository.** Its programs include BusyBox v1.36.1 (GPL-2.0-only; banner `BusyBox v1.36.1 (2026-02-16 07:52:06
+GMT)`), iperf3, `netbench` and `fb_fractal`.
+
+The Buildroot used by `sonata-linux` is `https://github.com/jrrk2/buildroot.git`, detached at
+`aa98f0825d86bf2765befedee9d47e74bc5b0126` (Buildroot `2026.05-git`), with the external tree
+`linux-on-litex-vexriscv/buildroot` (defconfig `configs/litex_vexriscv_sonata_defconfig`). Its toolchain is
+`riscv32-buildroot-linux-musl` with musl 1.2.5 (which has an `arch/riscv32` port).
+
+**The recorded provenance does not match the binary**, and this repository cannot say why: at that Buildroot
+revision the BusyBox package is 1.37.0, not 1.36.1; the defconfig sets `BR2_RISCV_ISA_RVC=n` while the binary uses
+compressed instructions; and the binary has no `udhcpc`. So the supplied `rootfs-base.romfs` came from another
+Buildroot revision or configuration that is not recorded. The complete source of its programs is that build's
+package set (BusyBox from `https://busybox.net/downloads/`, musl, iperf3 and the rest), and whoever distributes this
+repository must supply, or offer, it (GPL-2.0 section 3). The maintainer who provided the file is the only one who
+has the details.
 
 ## Versions used for the committed images and bitstream
 
