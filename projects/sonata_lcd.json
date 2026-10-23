@@ -1,0 +1,112 @@
+{
+  "blackboxes": [
+    "BUFG",
+    "IBUFDS",
+    "MMCME2_ADV",
+    "IBUF",
+    "OBUF",
+    "RAMB36E1"
+  ],
+  "capacity": {
+    "BUFG": 32,
+    "DSP": 120,
+    "FF": 65200,
+    "IO": 210,
+    "LUT": 32600,
+    "LUTRAM": 9600,
+    "RAMB36": 75
+  },
+  "convert": "{root}/xc7/convert.py",
+  "defines": [
+    "SYNTHESIS"
+  ],
+  "device": "xc7a50t",
+  "incdirs": [],
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "name": "sonata_lcd",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "part": "xc7a50tcsg324-1",
+  "prjxray_db": "{deps}/prjxray-db",
+  "python": "{builds}/venv/bin/python",
+  "sources": [
+    "{root}/projects/sonata_lcd-src/top.v",
+    "{root}/projects/sonata_lcd-src/counter25_core.v",
+    "{root}/projects/sonata-lib/lcd_dbg.v",
+    "{root}/projects/sonata-lib/lcd_font.v",
+    "{root}/projects/sonata-lib/lcd_init_rom.v"
+  ],
+  "srcdir": "{root}/projects/sonata_lcd-src",
+  "sta": "{prefix}/bin/sta",
+  "steps": [
+    {
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
+      "id": "synth",
+      "label": "Synthesize"
+    },
+    {
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}",
+      "id": "pnr",
+      "label": "Place & Route"
+    },
+    {
+      "id": "fom",
+      "label": "Block RAM merit",
+      "command": "{python} {bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+    },
+    {
+      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "id": "sta",
+      "label": "OpenSTA"
+    },
+    {
+      "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {lvs_equiv} --gold {json} --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --db {prjxray_db}/{family} --device {device} --quiet",
+      "id": "lvs",
+      "label": "LVS"
+    },
+    {
+      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}",
+      "id": "bit",
+      "label": "Bitstream"
+    },
+    {
+      "id": "uf2",
+      "label": "UF2",
+      "command": "{python} {root}/xc7/bit2uf2.py {bit} {work}/{top}.bit.slot1.uf2 --slot 1"
+    },
+    {
+      "command": "{openfpgaloader} -c ft4232 {bit}",
+      "id": "program",
+      "label": "Program (JTAG)"
+    },
+    {
+      "id": "program_uf2",
+      "label": "Program (SONATA drive)",
+      "command": "cp {work}/{top}.bit.slot1.uf2 /Volumes/SONATA/ && sync"
+    }
+  ],
+  "top": "top",
+  "verilator": "{prefix}/bin/verilator",
+  "verilator_root": "{prefix}/share/verilator",
+  "work": "~/synthgui-work/sonata_lcd",
+  "xdc": "{root}/projects/sonata_lcd-src/top.xdc",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
+  "options": {
+    "pnr.router": "router2",
+    "pnr.allow_fail": "1",
+    "pnr.hold_fix": "8",
+    "pnr.timingweight": "60",
+    "pnr.clock_tree": "on",
+    "pnr.bram_place": "on",
+    "synth.warn.WIDTHTRUNC": "1",
+    "synth.warn.WIDTHEXPAND": "1",
+    "synth.warn.MULTIDRIVEN": "1",
+    "synth.warn.BLKANDNBLK": "1",
+    "synth.warn.PINMISSING": "1",
+    "synth.warn.UNOPTFLAT": "1",
+    "synth.warn.TIMESCALEMOD": "1",
+    "synth.warn.SPECIFYIGN": "1"
+  },
+  "family": "artix7"
+}
