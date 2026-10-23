@@ -101,6 +101,10 @@ soft core, so keep programs small.
 * DNS works because `/etc/resolv.conf` is a link to `/proc/net/pnp`, which the kernel fills from DHCP; `udhcpc` is also
   available, though the kernel (`ip=dhcp`) has already configured `eth0`.
 * `showlogo [seconds]` shows the boot logo.
+* **Nothing written on the board survives a reboot.** `/tmp` is a tmpfs (RAM) and the root filesystem is read-only; the
+  flash is written only by the BIOS. Keep your work on the PC with TFTP: run `tools/tftpd.py` there, then on the board
+  `tftp -p -l pi.c -r pi.c 192.168.1.169` saves a file to `<tftp root>/upload/pi.c` and `tftp -g -r pi.c 192.168.1.169`
+  fetches it back (uploads never overwrite the served images). `nc host port < file` also works for one-off copies.
 
 ## Booting
 
