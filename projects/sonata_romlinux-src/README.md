@@ -96,7 +96,7 @@ The BIOS tries, in order: serial (SFL), flash, ROM, **kernel in flash**, then **
   Boot takes about 40 s, no network needed. Press Q or ESC at the countdown for the BIOS prompt. The kernel configures
   the network itself (`ip=dhcp`, `CONFIG_IP_PNP_DHCP`; this busybox has no `udhcpc`), which waits for the link and the
   DHCP lease at boot.
-* **LCD:** the BIOS writes status lines and the kernel's `sonata_lcdcon` console (`linux/kernel/drivers/video/`) writes
+* **LCD:** the panel is a 20x16 text console, or a 160x128 RGB565 frame buffer. The BIOS writes status lines and the kernel's `sonata_lcdcon` console (`linux/kernel/drivers/video/`) writes
   the last 15 kernel messages (timestamps stripped, lines cut at 20 columns) under a title bar with the uptime. The
   hardware scroll register rotates rows 1..15, so scrolling is one write.
 * **Network:** `tftpboot` (or `tftpget <file> <addr>`, then `boot`/`flash_write`). The 8 DIP switches select the TFTP
@@ -116,6 +116,19 @@ corresponding source for the GPL components; see `linux/SOURCES.md` for the exac
 what the repository does not contain. The kernel builds on macOS with the host shims in `linux/kernel/hostinc`
 and `ld.lld`.
 
+## LCD frame buffer
+
+`rtl/lcd_text.v` has two display modes. Text (default): a 20x16 character RAM at `0x80305000`, with the hardware scroll
+register at `+0x140`. Frame buffer: a 160x128 RGB565 image at `0x80310000` (two pixels per 32-bit word, pixel 0 in the
+low half; write-only, reads return zero; the gateware swaps red and blue for the panel's BGR order, so software uses
+plain RGB565). The mode register is word 81 (`+0x144`, bit 0). While `/dev/fb0` is open the Linux driver
+(`linux/kernel/drivers/video/fbdev/sonata_lcdfb.c`) sets frame buffer mode, so the text is hidden; closing the last
+user brings it back. `showlogo [seconds]` (`/usr/bin/showlogo` in the rootfs, from `linux/userland/showlogo`) shows the boot logo. A diagnostic register at
+`+0x148` (bit 0) shows a fixed red/green pattern in frame buffer mode instead of reading the RAM.
+The frame buffer starts out holding the boot logo: `lcd_fb_ram.v` is ten directly instantiated RAMB36E1 whose
+`INIT` parameters `linux/tools/gen_logo.py` fills from the logo image. From the BIOS prompt, `mem_write 0x80305144 1`
+shows it and `mem_write 0x80305144 0` goes back to the text.
+
 ## Lessons from bring-up
 
 * The stock stub writes PMP CSRs; this VexRiscv has none, so they trap and the CPU restarts the BIOS. `build_stub.sh
@@ -126,3 +139,11 @@ and `ld.lld`.
   (stacks for 2 harts + heap), which QEMU reproduces. The RAM kernel copied from flash is the supported route.
 * The Verilator-based mapper dropped a true-dual-port RAM and a flop with an async reset feeding back on itself,
   silently; `rtl/spi_buf_ram.sv` and `spi_wb.sv` are written to avoid both.
+* The mapper turns a dynamically indexed array of wires (`assign q = qb[sel]`) or a hierarchical reference into a
+  generate block into a constant, silently: the frame buffer read as black until the block RAM outputs were ten
+  plain wires chosen by a `case`. A memory written as arrays without `ram_style = "block"`, or with a read it does not
+  recognise as synchronous, becomes distributed RAM (a 40 KB buffer then costs 11,000 LUTs and placement takes
+  minutes). Directly instantiating RAMB36E1 (as in `lcd_fb_ram.v`) avoids both.
+* Debugging with an initial value in the memory and a fixed-pattern register, instead of through the CPU, told the
+  display path, the memory and the bus write path apart in three short hardware runs.
+

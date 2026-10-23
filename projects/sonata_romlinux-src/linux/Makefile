@@ -58,6 +58,8 @@ $(LINUX)/.git:
 $(LINUX)/arch/riscv/boot/Image: $(LINUX)/.git images/sonata-ram.dtb kernel/ram-additions.config $(wildcard kernel/drivers/*/*.c kernel/drivers/*/*/*/*/*.[ch])
 	cp -r kernel/drivers/* $(LINUX)/drivers/
 	grep -q sonata_lcdcon $(LINUX)/drivers/video/Makefile || echo 'obj-y += sonata_lcdcon.o' >> $(LINUX)/drivers/video/Makefile
+	grep -q sonata_lcdfb $(LINUX)/drivers/video/fbdev/Makefile || echo 'obj-$$(CONFIG_FB_SONATA) += sonata_lcdfb.o' >> $(LINUX)/drivers/video/fbdev/Makefile
+	grep -q FB_SONATA $(LINUX)/drivers/video/fbdev/Kconfig || printf 'config FB_SONATA\n\tbool "Sonata board LCD frame buffer"\n\tdepends on FB && OF\n\tselect FB_IOMEM_HELPERS\n\thelp\n\t  160x128 RGB565 frame buffer of the Sonata LCD text/graphics block.\n' >> $(LINUX)/drivers/video/fbdev/Kconfig
 	cp images/sonata-ram.dtb $(LINUX)/arch/riscv/boot/dts/litex/sonata.dtb
 	base64 $(LINUX)/arch/riscv/boot/dts/litex/sonata.dtb > $(LINUX)/arch/riscv/boot/dts/litex/sonata.dtb.b64
 	cd $(LINUX) && $(KMAKE) tinyconfig && \
@@ -109,9 +111,14 @@ $(BB)/busybox: build/busybox-$(BUSYBOX_VER).tar.bz2 build/rv32-gcc userland/busy
 # The base romfs has no /sbin/init (this busybox has no init applet): tools/romfs_add.py adds a shell-script init
 # that mounts /proc and /sys and starts a shell, replaces /bin/busybox with the one built above, links every applet
 # to it and installs the udhcpc script.
-images/rootfs.romfs: tools/romfs_add.py $(ROOTFS_BASE) $(BB)/busybox
+# also writes rtl/lcd_fb_ram.v, the LCD frame buffer RAM with the logo as its initial contents (needs a new bitstream)
+images/sonata-logo.rgb565: tools/gen_logo.py ../../sonata-lib/font8x8_basic.h
+	python3 tools/gen_logo.py $@ ../rtl
+
+images/rootfs.romfs: tools/romfs_add.py $(ROOTFS_BASE) $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo
 	python3 -I tools/romfs_add.py $(ROOTFS_BASE) $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \
-	  --udhcpc-script $(BB)/examples/udhcp/simple.script
+	  --udhcpc-script $(BB)/examples/udhcp/simple.script \
+	  --file /usr/share/sonata-logo.rgb565=images/sonata-logo.rgb565 --file /usr/bin/showlogo=userland/showlogo:x
 
 # Sizes come from the files: flash_write needs the exact length, flash_erase_range the length rounded up to the
 # 64 KB erase sector, and mem_cmp counts 32-bit words.

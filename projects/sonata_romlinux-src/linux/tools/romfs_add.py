@@ -4,6 +4,8 @@ ap.add_argument("src"); ap.add_argument("dst")
 ap.add_argument("--busybox", help="replace /bin/busybox with this file")
 ap.add_argument("--links", help="busybox.links: add a symlink to /bin/busybox for every applet path in it")
 ap.add_argument("--udhcpc-script", help="install as /usr/share/udhcpc/default.script")
+ap.add_argument("--file", action="append", default=[], metavar="PATH=SRC[:x]",
+                help="add the file SRC as PATH in the image (:x marks it executable)")
 args = ap.parse_args()
 src, dst = args.src, args.dst
 d=open(src,'rb').read()
@@ -58,6 +60,10 @@ if args.links:
         p = line if line.startswith("/") else "/" + line
         if p not in ("/bin/busybox", "/sbin/init"):
             put(p, 3, b'/bin/busybox')
+for spec in args.file:
+    path, _, srcfile = spec.partition("=")
+    exe = 8 if srcfile.endswith(":x") else 0
+    put(path, 2, open(srcfile.removesuffix(":x"), 'rb').read(), exe)
 if args.udhcpc_script:
     put("/usr/share/udhcpc/default.script", 2, open(args.udhcpc_script, 'rb').read(), 8)
 

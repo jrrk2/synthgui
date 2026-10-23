@@ -38,6 +38,7 @@
     "{root}/projects/sonata_romlinux-src/Ram_1w_1rs_Generic.v",
     "{root}/projects/sonata_romlinux-src/VexRiscvLitexSmpCluster_Cc1_Iw32Is4096Iy1_Dw32Ds4096Dy1_ITs4DTs4_Ood_Wm_Rvc.v",
     "{root}/projects/sonata_romlinux-src/rtl/lcd_text.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_fb_ram.v",
     "{root}/projects/sonata_romlinux-src/rtl/lcd_font.v",
     "{root}/projects/sonata_romlinux-src/rtl/lcd_init_rom.v",
     "{root}/projects/sonata_romlinux-src/rtl/spi_buf_ram.sv",

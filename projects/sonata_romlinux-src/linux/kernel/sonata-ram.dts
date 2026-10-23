@@ -152,6 +152,11 @@
                 reg = <0x80305000 0x200>;
             };
 
+            lcdfb: framebuffer@80310000 {
+                compatible = "sonata,lcdfb";
+                reg = <0x80310000 0xa000>, <0x80305000 0x200>;
+            };
+
             spi_eth: spi@80302000 {
                 compatible = "lowrisc,opentitan-spi";
                 reg = <0x80302000 0x2000>;

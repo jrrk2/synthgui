@@ -120,16 +120,22 @@ class SPIHost(LiteXModule):
 class LCDText(LiteXModule):
     """The 160x128 ST7735 LCD as a 20x16 text console (rtl/lcd_text.v): a write-only Wishbone window onto the
     character RAM (byte at row*20+col, bit 7 = yellow, row 0 = white title) and, at byte offset 0x140, the
-    hardware scroll register for rows 1..15."""
+    hardware scroll register for rows 1..15 (word 80) and the mode register (word 81, bit 0 = show the frame
+    buffer). A second window, fb_bus, is the write-only 160x128 RGB565 frame buffer (two pixels per word)."""
     def __init__(self, pads, sys_clk_freq):
         self.bus = wishbone.Interface(data_width=32, adr_width=7)
-        wr = Signal()
-        self.comb += [wr.eq(self.bus.cyc & self.bus.stb & self.bus.we & ~self.bus.ack), self.bus.dat_r.eq(0)]
-        self.sync += self.bus.ack.eq(self.bus.cyc & self.bus.stb & ~self.bus.ack)
+        self.fb_bus = wishbone.Interface(data_width=32, adr_width=14)
+        wr, fwr = Signal(), Signal()
+        self.comb += [wr.eq(self.bus.cyc & self.bus.stb & self.bus.we & ~self.bus.ack), self.bus.dat_r.eq(0),
+                      fwr.eq(self.fb_bus.cyc & self.fb_bus.stb & self.fb_bus.we & ~self.fb_bus.ack),
+                      self.fb_bus.dat_r.eq(0)]
+        self.sync += [self.bus.ack.eq(self.bus.cyc & self.bus.stb & ~self.bus.ack),
+                      self.fb_bus.ack.eq(self.fb_bus.cyc & self.fb_bus.stb & ~self.fb_bus.ack)]
         self.specials += Instance("lcd_text",
             p_CLK_HZ=int(sys_clk_freq),
             i_clk=ClockSignal(), i_rst=ResetSignal(),
             i_wr=wr, i_wa=self.bus.adr, i_wd=self.bus.dat_w, i_wsel=self.bus.sel,
+            i_fwr=fwr, i_fwa=self.fb_bus.adr, i_fwd=self.fb_bus.dat_w, i_fwsel=self.fb_bus.sel,
             o_lcd_rst=pads.rst, o_lcd_dc=pads.dc, o_lcd_copi=pads.copi, o_lcd_clk=pads.clk,
             o_lcd_cs=pads.cs, o_lcd_backlight=pads.backlight)
 
@@ -282,7 +288,9 @@ class BaseSoC(SoCCore):
         # LCD text console ---------------------------------------------------------------------------
         self.lcd = LCDText(platform.request("lcd"), sys_clk_freq)
         self.bus.add_slave("lcd", self.lcd.bus, SoCRegion(origin=0x80305000, size=0x200, cached=False))
+        self.bus.add_slave("lcd_fb", self.lcd.fb_bus, SoCRegion(origin=0x80310000, size=0x10000, cached=False))
         self.add_constant("LCD_BASE", 0x80305000)
+        self.add_constant("LCD_FB_BASE", 0x80310000)
         self.add_constant("SPIETH_BASE", 0x80302000)
         for i, b in enumerate(remote_ip.split(".")):
             self.add_constant("SPIETH_REMOTEIP%d" % (i + 1), int(b))

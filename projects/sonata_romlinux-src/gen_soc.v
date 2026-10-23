@@ -11,7 +11,7 @@
 // Device     : xc7a50tcsg324-1
 // Hierarchy  : disabled
 // LiteX sha1 : b91b9c6bb
-// Date       : 2026-10-23 08:48:57
+// Date       : 2026-10-23 15:57:47
 //------------------------------------------------------------------------------
 
 `timescale 1ns / 1ps
@@ -218,13 +218,26 @@ BaseSoC
 │         └── csrstatus_5 (CSRStatus) [Gen]
 ├── csr_interconnect (InterconnectShared)
 ├── [BB:IOBUF]
+├── [BB:IOBUF]
+├── [BB:IOBUF]
 ├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
+├── [BB:IOBUF]
+├── [BB:IOBUF]
 ├── [BB:IOBUF]
 ├── [BB:IOBUF]
 ├── [BB:FDCE]
 ├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:FDCE]
+├── [BB:IOBUF]
 ├── [BB:IOBUF]
 ├── [BB:IOBUF]
 ├── [BB:FDPE]
@@ -232,19 +245,6 @@ BaseSoC
 ├── [BB:IOBUF]
 ├── [BB:IOBUF]
 ├── [BB:IOBUF]
-├── [BB:IOBUF]
-├── [BB:IOBUF]
-├── [BB:IOBUF]
-├── [BB:IOBUF]
-├── [BB:IOBUF]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
-├── [BB:FDCE]
 └── [BB:FDCE]
 Legend:
   [Gen]: Auto-generated instance name.
@@ -1377,18 +1377,30 @@ wire   [31:0] interface1_dat_r;
 reg    [31:0] interface1_dat_w = 32'd0;
 reg           interface1_re = 1'd0;
 reg           interface1_we = 1'd0;
-reg           lcd_bus_ack = 1'd0;
-wire    [6:0] lcd_bus_adr;
-wire    [1:0] lcd_bus_bte;
-wire    [2:0] lcd_bus_cti;
-wire          lcd_bus_cyc;
-wire   [31:0] lcd_bus_dat_r;
-wire   [31:0] lcd_bus_dat_w;
-reg           lcd_bus_err = 1'd0;
-wire    [3:0] lcd_bus_sel;
-wire          lcd_bus_stb;
-wire          lcd_bus_we;
-wire          lcd_wr;
+wire          lcdtext;
+reg           lcdtext_bus_ack = 1'd0;
+wire    [6:0] lcdtext_bus_adr;
+wire    [1:0] lcdtext_bus_bte;
+wire    [2:0] lcdtext_bus_cti;
+wire          lcdtext_bus_cyc;
+wire   [31:0] lcdtext_bus_dat_r;
+wire   [31:0] lcdtext_bus_dat_w;
+reg           lcdtext_bus_err = 1'd0;
+wire    [3:0] lcdtext_bus_sel;
+wire          lcdtext_bus_stb;
+wire          lcdtext_bus_we;
+reg           lcdtext_fb_bus_ack = 1'd0;
+wire   [13:0] lcdtext_fb_bus_adr;
+wire    [1:0] lcdtext_fb_bus_bte;
+wire    [2:0] lcdtext_fb_bus_cti;
+wire          lcdtext_fb_bus_cyc;
+wire   [31:0] lcdtext_fb_bus_dat_r;
+wire   [31:0] lcdtext_fb_bus_dat_w;
+reg           lcdtext_fb_bus_err = 1'd0;
+wire    [3:0] lcdtext_fb_bus_sel;
+wire          lcdtext_fb_bus_stb;
+wire          lcdtext_fb_bus_we;
+wire          lcdtext_fwr;
 reg     [7:0] leds_chaser = 8'd0;
 reg    [21:0] leds_count = 22'd3125000;
 wire          leds_done;
@@ -1423,8 +1435,8 @@ wire          socbushandler_shared_err;
 wire    [3:0] socbushandler_shared_sel;
 wire          socbushandler_shared_stb;
 wire          socbushandler_shared_we;
-reg     [8:0] socbushandler_slave_sel = 9'd0;
-reg     [8:0] socbushandler_slave_sel_r = 9'd0;
+reg     [9:0] socbushandler_slave_sel = 10'd0;
+reg     [9:0] socbushandler_slave_sel_r = 10'd0;
 wire          socbushandler_wait;
 reg     [1:0] spihost = 2'd0;
 wire          spihost_bus_ack;
@@ -1718,7 +1730,7 @@ assign basesoc_pbus_err = (socbushandler_shared_err & (socbushandler_grant == 1'
 assign socbushandler_request = {basesoc_pbus_cyc};
 assign socbushandler_grant = 1'd0;
 always @(*) begin
-    socbushandler_slave_sel = 9'd0;
+    socbushandler_slave_sel = 10'd0;
     socbushandler_slave_sel[0] = (socbushandler_shared_adr[29:20] == 10'd963);
     socbushandler_slave_sel[1] = (socbushandler_shared_adr[29:14] == 16'd61441);
     socbushandler_slave_sel[2] = (socbushandler_shared_adr[29:14] == 1'd0);
@@ -1727,7 +1739,8 @@ always @(*) begin
     socbushandler_slave_sel[5] = (socbushandler_shared_adr[29:23] == 1'd1);
     socbushandler_slave_sel[6] = (socbushandler_shared_adr[29:11] == 19'd262529);
     socbushandler_slave_sel[7] = (socbushandler_shared_adr[29:7] == 23'd4200488);
-    socbushandler_slave_sel[8] = (socbushandler_shared_adr[29:14] == 16'hf000);
+    socbushandler_slave_sel[8] = (socbushandler_shared_adr[29:14] == 16'd32817);
+    socbushandler_slave_sel[9] = (socbushandler_shared_adr[29:14] == 16'hf000);
 end
 assign basesoc_plicbus_adr = socbushandler_shared_adr;
 assign basesoc_plicbus_dat_w = socbushandler_shared_dat_w;
@@ -1778,13 +1791,20 @@ assign spihost_bus_stb = socbushandler_shared_stb;
 assign spihost_bus_we = socbushandler_shared_we;
 assign spihost_bus_cti = socbushandler_shared_cti;
 assign spihost_bus_bte = socbushandler_shared_bte;
-assign lcd_bus_adr = socbushandler_shared_adr;
-assign lcd_bus_dat_w = socbushandler_shared_dat_w;
-assign lcd_bus_sel = socbushandler_shared_sel;
-assign lcd_bus_stb = socbushandler_shared_stb;
-assign lcd_bus_we = socbushandler_shared_we;
-assign lcd_bus_cti = socbushandler_shared_cti;
-assign lcd_bus_bte = socbushandler_shared_bte;
+assign lcdtext_bus_adr = socbushandler_shared_adr;
+assign lcdtext_bus_dat_w = socbushandler_shared_dat_w;
+assign lcdtext_bus_sel = socbushandler_shared_sel;
+assign lcdtext_bus_stb = socbushandler_shared_stb;
+assign lcdtext_bus_we = socbushandler_shared_we;
+assign lcdtext_bus_cti = socbushandler_shared_cti;
+assign lcdtext_bus_bte = socbushandler_shared_bte;
+assign lcdtext_fb_bus_adr = socbushandler_shared_adr;
+assign lcdtext_fb_bus_dat_w = socbushandler_shared_dat_w;
+assign lcdtext_fb_bus_sel = socbushandler_shared_sel;
+assign lcdtext_fb_bus_stb = socbushandler_shared_stb;
+assign lcdtext_fb_bus_we = socbushandler_shared_we;
+assign lcdtext_fb_bus_cti = socbushandler_shared_cti;
+assign lcdtext_fb_bus_bte = socbushandler_shared_bte;
 assign interface0_adr = socbushandler_shared_adr;
 assign interface0_dat_w = socbushandler_shared_dat_w;
 assign interface0_sel = socbushandler_shared_sel;
@@ -1799,16 +1819,17 @@ assign basesoc_ram_bus_ram_bus_cyc = (socbushandler_shared_cyc & socbushandler_s
 assign wb_cpu_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[4]);
 assign basesoc_adapted_interface_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[5]);
 assign spihost_bus_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[6]);
-assign lcd_bus_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[7]);
-assign interface0_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[8]);
-assign socbushandler_shared_err = ((((((((basesoc_plicbus_err | basesoc_clintbus_err) | basesoc_basesoc_ram_bus_err) | basesoc_ram_bus_ram_bus_err) | wb_cpu_err) | basesoc_adapted_interface_err) | spihost_bus_err) | lcd_bus_err) | interface0_err);
+assign lcdtext_bus_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[7]);
+assign lcdtext_fb_bus_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[8]);
+assign interface0_cyc = (socbushandler_shared_cyc & socbushandler_slave_sel[9]);
+assign socbushandler_shared_err = (((((((((basesoc_plicbus_err | basesoc_clintbus_err) | basesoc_basesoc_ram_bus_err) | basesoc_ram_bus_ram_bus_err) | wb_cpu_err) | basesoc_adapted_interface_err) | spihost_bus_err) | lcdtext_bus_err) | lcdtext_fb_bus_err) | interface0_err);
 assign socbushandler_wait = ((socbushandler_shared_stb & socbushandler_shared_cyc) & (~socbushandler_shared_ack));
 always @(*) begin
     socbushandler_error = 1'd0;
     socbushandler_shared_ack = 1'd0;
     socbushandler_shared_dat_r = 32'd0;
-    socbushandler_shared_ack = ((((((((basesoc_plicbus_ack | basesoc_clintbus_ack) | basesoc_basesoc_ram_bus_ack) | basesoc_ram_bus_ram_bus_ack) | wb_cpu_ack) | basesoc_adapted_interface_ack) | spihost_bus_ack) | lcd_bus_ack) | interface0_ack);
-    socbushandler_shared_dat_r = ((((((((({32{socbushandler_slave_sel_r[0]}} & basesoc_plicbus_dat_r) | ({32{socbushandler_slave_sel_r[1]}} & basesoc_clintbus_dat_r)) | ({32{socbushandler_slave_sel_r[2]}} & basesoc_basesoc_ram_bus_dat_r)) | ({32{socbushandler_slave_sel_r[3]}} & basesoc_ram_bus_ram_bus_dat_r)) | ({32{socbushandler_slave_sel_r[4]}} & wb_cpu_dat_r)) | ({32{socbushandler_slave_sel_r[5]}} & basesoc_adapted_interface_dat_r)) | ({32{socbushandler_slave_sel_r[6]}} & spihost_bus_dat_r)) | ({32{socbushandler_slave_sel_r[7]}} & lcd_bus_dat_r)) | ({32{socbushandler_slave_sel_r[8]}} & interface0_dat_r));
+    socbushandler_shared_ack = (((((((((basesoc_plicbus_ack | basesoc_clintbus_ack) | basesoc_basesoc_ram_bus_ack) | basesoc_ram_bus_ram_bus_ack) | wb_cpu_ack) | basesoc_adapted_interface_ack) | spihost_bus_ack) | lcdtext_bus_ack) | lcdtext_fb_bus_ack) | interface0_ack);
+    socbushandler_shared_dat_r = (((((((((({32{socbushandler_slave_sel_r[0]}} & basesoc_plicbus_dat_r) | ({32{socbushandler_slave_sel_r[1]}} & basesoc_clintbus_dat_r)) | ({32{socbushandler_slave_sel_r[2]}} & basesoc_basesoc_ram_bus_dat_r)) | ({32{socbushandler_slave_sel_r[3]}} & basesoc_ram_bus_ram_bus_dat_r)) | ({32{socbushandler_slave_sel_r[4]}} & wb_cpu_dat_r)) | ({32{socbushandler_slave_sel_r[5]}} & basesoc_adapted_interface_dat_r)) | ({32{socbushandler_slave_sel_r[6]}} & spihost_bus_dat_r)) | ({32{socbushandler_slave_sel_r[7]}} & lcdtext_bus_dat_r)) | ({32{socbushandler_slave_sel_r[8]}} & lcdtext_fb_bus_dat_r)) | ({32{socbushandler_slave_sel_r[9]}} & interface0_dat_r));
     if (socbushandler_done) begin
         socbushandler_shared_dat_r = 32'hffffffff;
         socbushandler_shared_ack = 1'd1;
@@ -3234,8 +3255,10 @@ always @(*) begin
         end
     endcase
 end
-assign lcd_wr = (((lcd_bus_cyc & lcd_bus_stb) & lcd_bus_we) & (~lcd_bus_ack));
-assign lcd_bus_dat_r = 1'd0;
+assign lcdtext = (((lcdtext_bus_cyc & lcdtext_bus_stb) & lcdtext_bus_we) & (~lcdtext_bus_ack));
+assign lcdtext_bus_dat_r = 1'd0;
+assign lcdtext_fwr = (((lcdtext_fb_bus_cyc & lcdtext_fb_bus_stb) & lcdtext_fb_bus_we) & (~lcdtext_fb_bus_ack));
+assign lcdtext_fb_bus_dat_r = 1'd0;
 assign leds_wait = (~leds_done);
 always @(*) begin
     leds_leds = 8'd0;
@@ -4267,7 +4290,8 @@ always @(posedge sys_clk) begin
     if (basesoc_dq_oe_builder_litespiphy_next_value_ce2) begin
         basesoc_dq_oe <= basesoc_dq_oe_builder_litespiphy_next_value2;
     end
-    lcd_bus_ack <= ((lcd_bus_cyc & lcd_bus_stb) & (~lcd_bus_ack));
+    lcdtext_bus_ack <= ((lcdtext_bus_cyc & lcdtext_bus_stb) & (~lcdtext_bus_ack));
+    lcdtext_fb_bus_ack <= ((lcdtext_fb_bus_cyc & lcdtext_fb_bus_stb) & (~lcdtext_fb_bus_ack));
     if (leds_done) begin
         leds_chaser <= {leds_chaser, (~leds_chaser[7])};
     end
@@ -4595,13 +4619,14 @@ always @(posedge sys_clk) begin
         eth_rst_storage <= 1'd0;
         eth_rst_wr_stb <= 1'd0;
         dip_wr_stb <= 1'd0;
-        lcd_bus_ack <= 1'd0;
+        lcdtext_bus_ack <= 1'd0;
+        lcdtext_fb_bus_ack <= 1'd0;
         leds_storage <= 8'd0;
         leds_wr_stb <= 1'd0;
         leds_chaser <= 8'd0;
         leds_mode <= 1'd0;
         leds_count <= 22'd3125000;
-        socbushandler_slave_sel_r <= 9'd0;
+        socbushandler_slave_sel_r <= 10'd0;
         socbushandler_count <= 20'd1000000;
         csr_bankarray_sel_r <= 1'd0;
         subfragments_rs232phytx_state <= 1'd0;
@@ -4675,10 +4700,10 @@ end
 //------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------
-// Memory rom: 8867-words x 32-bit
+// Memory rom: 8877-words x 32-bit
 //------------------------------------------------------------------------------
 // Port 0 | Read: Sync  | Write: ---- | 
-reg [31:0] rom[0:8866];
+reg [31:0] rom[0:8876];
 initial begin
 	$readmemh("gen_soc_rom.init", rom);
 end
@@ -4861,11 +4886,15 @@ lcd_text #(
 ) lcd_text (
 	// Inputs.
 	.clk           (sys_clk),
+	.fwa           (lcdtext_fb_bus_adr),
+	.fwd           (lcdtext_fb_bus_dat_w),
+	.fwr           (lcdtext_fwr),
+	.fwsel         (lcdtext_fb_bus_sel),
 	.rst           (sys_rst),
-	.wa            (lcd_bus_adr),
-	.wd            (lcd_bus_dat_w),
-	.wr            (lcd_wr),
-	.wsel          (lcd_bus_sel),
+	.wa            (lcdtext_bus_adr),
+	.wd            (lcdtext_bus_dat_w),
+	.wr            (lcdtext),
+	.wsel          (lcdtext_bus_sel),
 
 	// Outputs.
 	.lcd_backlight (lcd_backlight),
@@ -5488,5 +5517,5 @@ FDCE FDCE_21(
 endmodule
 
 // -----------------------------------------------------------------------------
-//  Auto-Generated by LiteX on 2026-10-23 08:48:57.
+//  Auto-Generated by LiteX on 2026-10-23 15:57:47.
 //------------------------------------------------------------------------------
