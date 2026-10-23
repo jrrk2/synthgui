@@ -53,6 +53,12 @@ binary. `tools/romfs_add.py` starts from an empty romfs and adds:
   on the host, `libtcc1.a` built by the cross gcc), plus one patch, `userland/tcc-riscv32-abs-relocs.patch`. The patch adds
   the absolute `R_RISCV_HI20`, `LO12_I` and `LO12_S` relocations to `riscv32-link.c`: GCC's default 32-bit RISC-V
   code model (`medlow`) uses them, so without them `tcc` cannot link against `libc.a` or the toolchain's `libgcc.a`.
+  A second patch, `userland/tcc-static-libgcc.patch`, makes `tcc` link `libgcc.a` (the soft-float, `long double` and
+  64-bit division helpers) in a static link too: upstream adds it only for dynamic links, and it has to come after
+  `libc.a` because an archive is scanned once, in order. And one configure flag is added to the recipe's,
+  `--tcc-switches=-static`, because the board has a static libc only (no musl loader), so a dynamically linked `a.out`
+  cannot run. Both are in the rootfs image but had not been run on the board when this was written: on the board,
+  `tcc -static pi.c -lc /usr/lib/libgcc.a` (the same link order) was verified to build and run a float `printf` program.
   `tools/stage_tcc.py` lays out the on-board tree (`/usr/bin/tcc`, `/usr/lib/tcc/{libtcc1.a,include}`, musl's headers,
   the kernel headers a program needs, `crt*.o`, stripped `libc.a` and `libgcc.a`). The `cc` command is `tcc -static`.
 * **Files from this repository**: `userland/skeleton/` (`/etc/inittab`, `profile`, `passwd`, `group`, `hosts`),

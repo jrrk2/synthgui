@@ -1,0 +1,15 @@
+diff --git a/tccelf.c b/tccelf.c
+index f5154fe..e1d9874 100644
+--- a/tccelf.c
++++ b/tccelf.c
+@@ -1843,7 +1843,9 @@ ST_FUNC void tcc_add_runtime(TCCState *s1)
+             tcc_add_library(s1, "pthread");
+         tcc_add_library(s1, "c");
+ #ifdef TCC_LIBGCC
+-        if (!s1->static_link) {
++        /* libgcc_s.so.1 only makes sense for a dynamic link, but an absolute path names an archive (libgcc.a), which
++           a static link needs too: the soft-float and 64-bit division helpers live there */
++        if (!s1->static_link || TCC_LIBGCC[0] == '/') {
+             if (TCC_LIBGCC[0] == '/')
+                 tcc_add_file(s1, TCC_LIBGCC);
+             else

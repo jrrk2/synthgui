@@ -113,14 +113,16 @@ $(BB)/busybox: build/busybox-$(BUSYBOX_VER).tar.bz2 build/rv32-gcc userland/busy
 # ---- tcc, configured as package/tcc/tcc.mk does (jrrk2/buildroot), built with the same cross compiler. The recipe
 # links against the Buildroot toolchain's libc.a and libgcc.a, which GCC compiles with absolute lui/addi addressing
 # (-mcmodel=medlow); the port's linker lacks those relocations (HI20, LO12_I, LO12_S), so userland/tcc-riscv32-abs-relocs.patch
-# adds them. c2str.exe is a build-time generator and runs on the host; libtcc1.a is built by the cross gcc.
-$(TCC)/tcc: build/rv32-gcc userland/tcc-riscv32-abs-relocs.patch
+# adds them; userland/tcc-static-libgcc.patch links libgcc.a in a static link too (tcc only does it for dynamic links, but
+# the soft-float and 64-bit division helpers are needed either way). One flag is added to the recipe's: --tcc-switches=-static,
+# because the board has a static libc only (no ld-musl loader), so a dynamically linked a.out cannot run. c2str.exe is a build-time generator and runs on the host; libtcc1.a is built by the cross gcc.
+$(TCC)/tcc: build/rv32-gcc $(wildcard userland/tcc-*.patch)
 	rm -rf $(TCC) && mkdir -p $(TCC)
 	cd $(TCC) && git init -q && git remote add origin $(TCC_URL) && git -c http.version=HTTP/1.1 fetch -q --depth 1 origin $(TCC_REV) && git checkout -q FETCH_HEAD
-	cd $(TCC) && patch -p1 < $(CURDIR)/userland/tcc-riscv32-abs-relocs.patch
+	cd $(TCC) && for p in $(CURDIR)/userland/tcc-*.patch; do patch -p1 < $$p || exit 1; done
 	cd $(TCC) && PATH=$(CURDIR)/build:$$PATH ./configure --prefix=/usr --cpu=riscv32 --targetos=Linux \
 	  --cc=rv32-gcc --ar=$(CROSS)ar --config-musl --elfinterp=/lib/ld-musl-riscv32.so.1 --crtprefix=/usr/lib \
-	  --sysincludepaths=/usr/include --libpaths=/usr/lib/tcc:/usr/lib --with-libgcc --extra-cflags="-O2"
+	  --sysincludepaths=/usr/include --libpaths=/usr/lib/tcc:/usr/lib --with-libgcc --tcc-switches=-static --extra-cflags="-O2"
 	sed -i.bak 's|"libgcc_s.so.1"|"/usr/lib/libgcc.a"|' $(TCC)/config.h && rm -f $(TCC)/config.h.bak
 	cd $(TCC) && cc -DC2STR conftest.c -o c2str.exe
 	cd $(TCC) && PATH=$(CURDIR)/build:$$PATH $(MAKE) -j$(JOBS) riscv32-libtcc1-usegcc=yes
