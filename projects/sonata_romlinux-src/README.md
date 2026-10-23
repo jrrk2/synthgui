@@ -110,7 +110,8 @@ The BIOS tries, in order: serial (SFL), flash, ROM, **kernel in flash**, then **
 
 `linux/images/` holds the built binaries: `stub.bin`, `kernel.bin`, `sonata-ram.dtb`, `rootfs.romfs`. `linux/Makefile`
 rebuilds all of them from source (kernel `jrrk2/linux` at `af93851f1ec4d62f7f8c91b5399849c604c19144` with the patches
-in `linux/kernel/`, the stub in `stub.S`, the rootfs from `rootfs-base.romfs` plus `tools/romfs_add.py`); that is the
+in `linux/kernel/`, the stub in `stub.S`, BusyBox 1.37.0 and musl 1.2.5 built with the same `riscv64-elf-gcc` and
+`linux/userland/busybox.config`, and the rootfs assembled from `rootfs-base.romfs` plus those by `tools/romfs_add.py`); that is the
 corresponding source for the GPL components; see `linux/SOURCES.md` for the exact revisions, tool versions, licences and
 what the repository does not contain. The kernel builds on macOS with the host shims in `linux/kernel/hostinc`
 and `ld.lld`.
