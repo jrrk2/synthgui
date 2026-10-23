@@ -622,6 +622,49 @@ static void send_udp(const uint8_t *dst_mac, uint32_t dst_ip,
   ksz_tx(pkt, eth_total);
 }
 
+// ---- tftpflash: stream a TFTP file into the SPI flash ----
+//
+// Blocks are collected into one 64 KB erase block in main RAM; each full block is erased, programmed and verified
+// (spiflash_write_stream verifies) and the next one started, so the file size is limited by the flash only, not by RAM.
+// The ACK of a data block is sent before the flash work, so a slow erase never makes the server retransmit.
+
+#ifdef CSR_SPIFLASH_MASTER_CS_ADDR
+#include <liblitespi/spiflash.h>
+#define TFLASH_BLOCK 0x10000
+#define TFLASH_STAGE ((uint8_t *)0x40700000UL)
+
+static int tftp_flash = 0;
+static uint32_t tflash_off = 0;      // flash offset of the erase block being collected
+static uint32_t tflash_fill = 0;
+static uint32_t tflash_total = 0;
+static int tflash_err = 0;
+
+static void tflash_flush(void) {
+  if (tflash_fill == 0 || tflash_err) return;
+  memset(TFLASH_STAGE + tflash_fill, 0xff, TFLASH_BLOCK - tflash_fill);
+  spiflash_erase_range(tflash_off, TFLASH_BLOCK);
+  if (spiflash_write_stream(tflash_off, TFLASH_STAGE, TFLASH_BLOCK) != TFLASH_BLOCK) {
+    printf("tftpflash: write/verify failed at 0x%08lx\n", (unsigned long)tflash_off);
+    tflash_err = 1;
+  }
+  tflash_off += TFLASH_BLOCK;
+  tflash_fill = 0;
+}
+
+static void tflash_feed(const uint8_t *p, uint16_t n) {
+  tflash_total += n;
+  while (n && !tflash_err) {
+    uint32_t room = TFLASH_BLOCK - tflash_fill;
+    uint32_t k = n < room ? n : room;
+    memcpy(TFLASH_STAGE + tflash_fill, p, k);
+    tflash_fill += k; p += k; n -= k;
+    if (tflash_fill == TFLASH_BLOCK) tflash_flush();
+  }
+}
+#else
+#define tftp_flash 0
+#endif
+
 // ---- TFTP RRQ ----
 
 static void send_tftp_rrq(void) {
@@ -873,6 +916,26 @@ static void rx_poll(void) {
               tftp_server_port = src_port;
 
             if (block == tftp_expected_block) {
+#ifdef CSR_SPIFLASH_MASTER_CS_ADDR
+              if (tftp_flash) {
+                send_tftp_ack(block);                       // before the flash work: it can take a second
+                tftp_expected_block++;
+                tftp_retry_timer = 0;
+                tftp_offset += payload_len;
+                tflash_feed(udp_data + 4, payload_len);
+                if ((block & 63) == 0)
+                  printf("tftpflash: %ld bytes\n", tftp_offset);
+                if (payload_len < TFTP_BLOCK_SIZE || tflash_err) {
+                  tflash_flush();
+                  tftp_state = TFTP_DONE;
+                  if (!tflash_err)
+                    printf("tftpflash: %ld bytes written and verified at flash 0x%08lx..0x%08lx\n", (long)tftp_offset,
+                      (unsigned long)(tflash_off - ((tflash_total + TFLASH_BLOCK - 1) / TFLASH_BLOCK) * TFLASH_BLOCK),
+                      (unsigned long)tflash_off);
+                }
+                continue;
+              }
+#endif
               uint8_t *dst = (uint8_t *)(TFTP_LOAD_ADDR + tftp_offset);
               memcpy(dst, udp_data + 4, payload_len);
               tftp_offset += payload_len;
@@ -914,6 +977,14 @@ void spieth_tftp_boot(void) {
   tftp_fn = SPIETH_BOOT_FILENAME; tftp_addr = SPIETH_LOAD_ADDR; tftp_noboot = 0;
   spieth_tftp_run();
 }
+#ifdef CSR_SPIFLASH_MASTER_CS_ADDR
+void spieth_tftp_flash(const char *fn, unsigned long flash_off) {
+  tftp_fn = fn; tftp_noboot = 1;
+  tftp_flash = 1; tflash_off = flash_off; tflash_fill = 0; tflash_total = 0; tflash_err = 0;
+  spieth_tftp_run();
+  tftp_flash = 0;
+}
+#endif
 void spieth_tftp_get(const char *fn, unsigned long addr) {
   tftp_fn = fn; tftp_addr = addr; tftp_noboot = 1;
   spieth_tftp_run();
@@ -1120,6 +1191,9 @@ static void spieth_tftp_run(void) {
             send_tftp_ack(tftp_expected_block - 1);
           }
         }
+      }
+      else if (tftp_state == TFTP_DONE && tftp_flash) {
+        return;
       }
       else if (tftp_state == TFTP_DONE && tftp_offset > 0 && tftp_noboot) {
         printf("loaded %ld bytes (0x%lx) at 0x%08lx\n", (long)tftp_offset, (unsigned long)tftp_offset, tftp_addr);

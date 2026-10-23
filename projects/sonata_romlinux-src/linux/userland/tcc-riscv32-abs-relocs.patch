@@ -1,0 +1,47 @@
+diff --git a/riscv32-link.c b/riscv32-link.c
+index e7d6aa8..bcd6281 100644
+--- a/riscv32-link.c
++++ b/riscv32-link.c
+@@ -33,6 +33,9 @@ ST_FUNC int code_reloc (int reloc_type)
+     case R_RISCV_JAL:
+         return 1;
+ 
++    case R_RISCV_HI20:
++    case R_RISCV_LO12_I:
++    case R_RISCV_LO12_S:
+     case R_RISCV_GOT_HI20:
+     case R_RISCV_PCREL_HI20:
+     case R_RISCV_PCREL_LO12_I:
+@@ -66,6 +69,9 @@ ST_FUNC int gotplt_entry_type (int reloc_type)
+     switch (reloc_type) {
+     case R_RISCV_ALIGN:
+     case R_RISCV_RELAX:
++    case R_RISCV_HI20:
++    case R_RISCV_LO12_I:
++    case R_RISCV_LO12_S:
+     case R_RISCV_RVC_BRANCH:
+     case R_RISCV_RVC_JUMP:
+     case R_RISCV_JUMP_SLOT:
+@@ -213,6 +219,22 @@ ST_FUNC void relocate(TCCState *s1, ElfW_Rel *rel, int type, unsigned char *ptr,
+     case R_RISCV_RELAX:
+         return;
+ 
++    /* absolute lui/addi addressing (GCC's default -mcmodel=medlow, used by libc.a and libgcc.a) */
++    case R_RISCV_HI20:
++        off32 = (val + 0x800) >> 12;
++        write32le(ptr, (read32le(ptr) & 0xfff)
++                       | ((off32 & 0xfffff) << 12));
++        return;
++    case R_RISCV_LO12_I:
++        write32le(ptr, (read32le(ptr) & 0xfffff)
++                       | ((val & 0xfff) << 20));
++        return;
++    case R_RISCV_LO12_S:
++        write32le(ptr, (read32le(ptr) & ~0xfe000f80)
++                       | (((val >> 5) & 0x7f) << 25)
++                       | ((val & 0x1f) << 7));
++        return;
++
+     case R_RISCV_BRANCH:
+         off32 = val - addr;
+         if ((off32 + (1 << 12)) & ~(uint32_t)0x1ffe)

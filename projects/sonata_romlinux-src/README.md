@@ -69,22 +69,38 @@ pythondata-software-picolibc and -compiler_rt; `riscv64-elf-gcc` with an rv32 mu
 5. **Linux images.** `make -C linux` builds `linux/images/{stub.bin,kernel.bin,sonata-ram.dtb,rootfs.romfs}` (see
    below). The committed images are the output of this Makefile.
 6. **Flash them.** Serve `linux/images/` over TFTP (`python3 linux/tools/tftpd.py linux/images`, then set the DIP
-   switches to the server's last octet), reset, press ESC at the boot countdown, and at the BIOS prompt (sizes are
-   `stat -c%s` of the files; erase lengths are the size rounded up to 64 KB; `mem_cmp` counts words):
+   switches to the server's last octet), reset, press ESC at the boot countdown, and at the BIOS prompt:
 
-       tftpget kernel.bin 0x40000000
-       flash_erase_range 0x0 <size rounded up to 0x10000>
-       flash_write 0x0 0x40000000 <size>
-       mem_cmp 0x02000000 0x40000000 <size/4>
-       tftpget rootfs.romfs 0x40000000
-       flash_erase_range 0x5C0000 <size rounded up to 0x10000>
-       flash_write 0x5C0000 0x40000000 <size>
-       mem_cmp 0x025C0000 0x40000000 <size/4>
+       tftpflash kernel.bin 0x0
+       tftpflash rootfs.romfs 0x5C0000
        reboot
 
-   Do not reset while `flash_write` runs (it is silent and takes about 2 minutes for the kernel); an interrupted
-   write leaves a corrupt kernel, recoverable by writing again from the BIOS prompt. `make -C linux flash` prints
-   these commands with the sizes filled in for the current images.
+   `tftpflash <file> <flash offset>` (a multiple of 0x10000) streams the file into the flash: it collects 64 KB, erases
+   that block, writes and verifies it, and goes on, so the file size is limited only by the flash (the `kernel_a`
+   partition is 0x540000 bytes, `rootfs` 0x1A40000) and nothing has to fit in the 8 MB of RAM. It prints
+   `N bytes written and verified at flash ...` when done. Do not reset while it runs; an interrupted write leaves a
+   corrupt partition, recovered by flashing again from the BIOS prompt. `make -C linux flash` prints the commands.
+   The TFTP server must tolerate pauses (a block takes a second or so to flash) and ignore duplicate ACKs; the
+   included `tools/tftpd.py` does.
+
+## Programming on the board
+
+The rootfs carries a C compiler (`tcc`, the riscv32 port in `jrrk2/tinycc`), musl's headers and static libraries, and
+examples. `cc file.c -o /tmp/prog` is `tcc -static`; the board has a static C library only. Output must go to `/tmp`
+(a 2 MB tmpfs); the root filesystem is read-only. A small program takes about 50 seconds to compile on the 50 MHz
+soft core, so keep programs small.
+
+* `/usr/share/examples/` has `gfx.h` (a header-only library for the 160x128 LCD: `gfx_pixel`, `gfx_line`, `gfx_rect`,
+  `gfx_circle`, `gfx_text` with an 8x8 font, `gfx_flip` to send the frame) and the demos `hello.c`, `plasma.c`, `mandel.c`,
+  `life.c` and `fbview.c`. Try `cp /usr/share/examples/* /tmp; cd /tmp; cc plasma.c -o plasma; ./plasma`. Opening
+  `/dev/fb0` hides the text console while the program runs.
+* Ready-made pictures: `tools/img2fb.py picture.png frame.raw [--gz] [--stretch]` (Pillow for PNG/JPEG, plain PPM
+  without it) makes a raw 160x128 RGB565 frame; serve it from the PC (`python3 -m http.server 8000`) and on the board run
+  `fbget http://pc:8000/frame.raw 10`. `fbget` also takes `.raw.gz`, checks the size, and shows the frame for N seconds.
+  BusyBox `wget` speaks HTTP and (with its built-in TLS, unauthenticated) HTTPS; there is no `curl`.
+* DNS works because `/etc/resolv.conf` is a link to `/proc/net/pnp`, which the kernel fills from DHCP; `udhcpc` is also
+  available, though the kernel (`ip=dhcp`) has already configured `eth0`.
+* `showlogo [seconds]` shows the boot logo.
 
 ## Booting
 
@@ -103,15 +119,15 @@ The BIOS tries, in order: serial (SFL), flash, ROM, **kernel in flash**, then **
   server: `0x00` is the built-in address (192.168.1.106, `--remote-ip`), any other value is the last octet on the same
   subnet. The switches are active low (ON = 0 on the pins), the BIOS inverts them. `linux/tools/tftpd.py` is a minimal
   TFTP server (port 69; macOS lets a normal user bind it).
-* **Flashing:** `make -C linux flash` prints the BIOS commands. `flash_write` does not erase: run `flash_erase_range`
-  first. `mem_cmp` counts words, not bytes.
+* **Flashing:** `tftpflash <file> <offset>` (see step 6 of "Rebuilding everything"). The lower-level `tftpget`, `flash_erase_range`,
+  `flash_write` and `mem_cmp` still exist; `flash_write` does not erase, and `mem_cmp` counts words, not bytes.
 
 ## Linux images (`linux/`)
 
 `linux/images/` holds the built binaries: `stub.bin`, `kernel.bin`, `sonata-ram.dtb`, `rootfs.romfs`. `linux/Makefile`
 rebuilds all of them from source (kernel `jrrk2/linux` at `af93851f1ec4d62f7f8c91b5399849c604c19144` with the patches
 in `linux/kernel/`, the stub in `stub.S`, BusyBox 1.37.0 and musl 1.2.5 built with the same `riscv64-elf-gcc` and
-`linux/userland/busybox.config`, and the rootfs assembled from `rootfs-base.romfs` plus those by `tools/romfs_add.py`); that is the
+`linux/userland/busybox.config`, tcc (the riscv32 port in `jrrk2/tinycc`, as in `jrrk2/buildroot`'s `package/tcc`) with one patch, the examples, and the rootfs assembled from all of these by `tools/romfs_add.py`); that is the
 corresponding source for the GPL components; see `linux/SOURCES.md` for the exact revisions, tool versions, licences and
 what the repository does not contain. The kernel builds on macOS with the host shims in `linux/kernel/hostinc`
 and `ld.lld`.
@@ -146,4 +162,11 @@ shows it and `mem_write 0x80305144 0` goes back to the text.
   minutes). Directly instantiating RAMB36E1 (as in `lcd_fb_ram.v`) avoids both.
 * Debugging with an initial value in the memory and a fixed-pattern register, instead of through the CPU, told the
   display path, the memory and the bus write path apart in three short hardware runs.
+* A romfs directory is not just a list: genromfs makes the root's first entry `.` a directory pointing at itself and every
+  other directory's `.` and `..` hard links to the directory entries in the parent lists. A generator that writes `.` as
+  a plain hard link makes the kernel follow the link forever when it mounts the root, and the boot hangs without a
+  message (`tools/romfs_add.py` now writes the genromfs structure; the hang reproduced in QEMU).
+* A TFTP server that counts a duplicate ACK as a lost packet gives up when the BIOS pauses to flash a block, and
+  retransmits in a burst; the cure is to ignore stale ACKs and resend only after a few seconds.
+* `tcc` needs absolute `lui`/`addi` relocations to link the toolchain's libraries (see `linux/SOURCES.md`).
 

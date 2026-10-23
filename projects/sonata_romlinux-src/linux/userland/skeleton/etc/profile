@@ -1,0 +1,3 @@
+# sourced by login shells; /sbin/init has already set PATH for the console shell
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+PS1="sonata# "

@@ -157,6 +157,25 @@ static void tftpget_handler(int nb_params, char **params)
 	spieth_tftp_get(params[0], addr);
 }
 define_command(tftpget, tftpget_handler, "Fetch a file via SPI Ethernet TFTP into RAM", BOOT_CMDS);
+
+#if defined(CSR_SPIFLASH_MASTER_CS_ADDR)
+static void tftpflash_handler(int nb_params, char **params)
+{
+	char *c;
+	unsigned long off;
+	if (nb_params < 2) {
+		printf("tftpflash <file> <flash offset, multiple of 0x10000>\n");
+		return;
+	}
+	off = strtoul(params[1], &c, 0);
+	if (*c != 0 || (off & 0xffff) || off >= 0x1000000) {
+		printf("Incorrect flash offset (a multiple of 0x10000 below 0x1000000)\n");
+		return;
+	}
+	spieth_tftp_flash(params[0], off);
+}
+define_command(tftpflash, tftpflash_handler, "Stream a TFTP file into the flash (erase, write, verify)", BOOT_CMDS);
+#endif
 #endif
 
 /**

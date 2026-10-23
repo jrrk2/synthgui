@@ -1,0 +1,24 @@
+#!/bin/sh
+# fbget URL [seconds] -- fetch a ready-made frame (raw 160x128 RGB565, 40960 bytes; a .gz copy is unpacked) with
+# wget and show it on the LCD for N seconds (default 10). Make frames on a PC with tools/img2fb.py.
+url=$1
+secs=${2:-10}
+if [ -z "$url" ]; then
+    echo "usage: fbget URL [seconds]    (URL: http://host/image.raw or image.raw.gz)" >&2
+    exit 1
+fi
+tmp=/tmp/fbget.$$
+wget -q -O "$tmp.dl" "$url" || { echo "fbget: download failed" >&2; rm -f "$tmp.dl"; exit 1; }
+case $url in
+    *.gz) zcat "$tmp.dl" > "$tmp" ;;
+    *)    cp "$tmp.dl" "$tmp" ;;
+esac
+rm -f "$tmp.dl"
+size=$(wc -c < "$tmp")
+if [ "$size" -ne 40960 ]; then
+    echo "fbget: got $size bytes, a frame is 40960 (160x128 RGB565)" >&2
+    rm -f "$tmp"
+    exit 1
+fi
+{ cat "$tmp"; sleep "$secs"; } > /dev/fb0
+rm -f "$tmp"

@@ -1,20 +1,28 @@
 import socket,sys,os,struct,threading,time
 root=sys.argv[1]
 def serve(data,addr,blk,s=None):
+    """send the data in blk-sized blocks, stop-and-wait. A stale (duplicate) ACK is ignored, not answered with a
+    retransmission, and a lost block is resent only after RETRY seconds: the BIOS's tftpflash can be busy erasing
+    and programming flash for a few seconds between two blocks."""
+    RETRY, GIVE_UP = 5.0, 120.0
     if s is None:
-        s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(2); s.bind(('',0))
+        s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(('',0))
     n=0
     while True:
-        chunk=data[n*blk:(n+1)*blk]; pkt=struct.pack('>HH',3,n+1)+chunk
-        for t in range(8):
-            s.sendto(pkt,addr)
+        chunk=data[n*blk:(n+1)*blk]; pkt=struct.pack('>HH',3,(n+1)&0xffff)+chunk
+        s.sendto(pkt,addr)
+        start=time.time(); resend=start+RETRY
+        while True:
+            s.settimeout(max(0.05,resend-time.time()))
             try:
                 r,a=s.recvfrom(600)
-                if a==addr and struct.unpack('>HH',r[:4])==(4,(n+1)&0xffff): break
-            except socket.timeout: pass
-        else: print('timeout',addr); return
+            except socket.timeout:
+                if time.time()-start>GIVE_UP: print('timeout',addr,flush=True); return
+                s.sendto(pkt,addr); resend=time.time()+RETRY
+                continue
+            if a==addr and len(r)>=4 and r[:2]==b'\0\4' and struct.unpack('>H',r[2:4])[0]==((n+1)&0xffff): break
         n+=1
-        if len(chunk)<blk: print('sent',len(data),'to',addr); return
+        if len(chunk)<blk: print('sent',len(data),'to',addr,flush=True); return
 def handle(pkt,addr,sock):
     op=struct.unpack('>H',pkt[:2])[0]
     if op!=1: return

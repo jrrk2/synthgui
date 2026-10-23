@@ -1,0 +1,3 @@
+#!/bin/sh
+# the board has a static C library only: build static executables (cc hello.c -o /tmp/hello)
+exec tcc -static "$@"

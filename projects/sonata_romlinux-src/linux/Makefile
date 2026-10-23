@@ -4,7 +4,7 @@
 #   images/kernel.bin      stub.bin + the RAM kernel Image; what the BIOS boots from flash or over TFTP
 #   images/sonata-ram.dtb  the device tree built into the kernel (kernel/sonata-ram.dts)
 #   images/rootfs.romfs    the read-only root filesystem (romfs) for the flash `rootfs` partition: BusyBox 1.37.0 +
-#                          musl 1.2.5 built here (userland/), the other programs from rootfs-base.romfs
+#                          musl 1.2.5, tcc and the examples (userland/), all built from source here
 #
 # Kernel source: https://github.com/jrrk2/linux revision af93851f1ec4d62f7f8c91b5399849c604c19144, built from
 # tinyconfig + kernel/ram-additions.config. kernel/drivers/ replaces the same-named files in that tree (Sonata
@@ -25,13 +25,15 @@ CROSS      ?= riscv64-elf-
 KERNEL_REV ?= af93851f1ec4d62f7f8c91b5399849c604c19144
 KERNEL_URL ?= https://github.com/jrrk2/linux.git
 LINUX      ?= $(CURDIR)/build/linux
-# rootfs-base.romfs: the romfs from sonata-linux (genromfs of the buildroot target); no /sbin/init in it
-ROOTFS_BASE ?= $(CURDIR)/rootfs-base.romfs
 JOBS       ?= 8
 MUSL_VER   ?= 1.2.5
 BUSYBOX_VER ?= 1.37.0
 SYSROOT    := $(CURDIR)/build/sysroot
 BB         := $(CURDIR)/build/busybox-$(BUSYBOX_VER)
+# the on-board C compiler: jrrk2/tinycc (riscv32 port) at the commit pinned in package/tcc/tcc.mk of jrrk2/buildroot
+TCC_REV    ?= f7e187ef8084d49fd458a5ecba54868cce24f62c
+TCC_URL    ?= https://github.com/jrrk2/tinycc.git
+TCC        := $(CURDIR)/build/tinycc
 
 UNAME := $(shell uname)
 ifeq ($(UNAME),Darwin)
@@ -108,6 +110,26 @@ $(BB)/busybox: build/busybox-$(BUSYBOX_VER).tar.bz2 build/rv32-gcc userland/busy
 	cd $(BB) && PATH=$(CURDIR)/build:$$PATH $(MAKE) -j$(JOBS) CC=rv32-gcc HOSTCC=cc AR=$(CROSS)ar STRIP=$(CROSS)strip
 	cd $(BB) && PATH=$(CURDIR)/build:$$PATH $(MAKE) busybox.links CC=rv32-gcc HOSTCC=cc
 
+# ---- tcc, configured as package/tcc/tcc.mk does (jrrk2/buildroot), built with the same cross compiler. The recipe
+# links against the Buildroot toolchain's libc.a and libgcc.a, which GCC compiles with absolute lui/addi addressing
+# (-mcmodel=medlow); the port's linker lacks those relocations (HI20, LO12_I, LO12_S), so userland/tcc-riscv32-abs-relocs.patch
+# adds them. c2str.exe is a build-time generator and runs on the host; libtcc1.a is built by the cross gcc.
+$(TCC)/tcc: build/rv32-gcc userland/tcc-riscv32-abs-relocs.patch
+	rm -rf $(TCC) && mkdir -p $(TCC)
+	cd $(TCC) && git init -q && git remote add origin $(TCC_URL) && git -c http.version=HTTP/1.1 fetch -q --depth 1 origin $(TCC_REV) && git checkout -q FETCH_HEAD
+	cd $(TCC) && patch -p1 < $(CURDIR)/userland/tcc-riscv32-abs-relocs.patch
+	cd $(TCC) && PATH=$(CURDIR)/build:$$PATH ./configure --prefix=/usr --cpu=riscv32 --targetos=Linux \
+	  --cc=rv32-gcc --ar=$(CROSS)ar --config-musl --elfinterp=/lib/ld-musl-riscv32.so.1 --crtprefix=/usr/lib \
+	  --sysincludepaths=/usr/include --libpaths=/usr/lib/tcc:/usr/lib --with-libgcc --extra-cflags="-O2"
+	sed -i.bak 's|"libgcc_s.so.1"|"/usr/lib/libgcc.a"|' $(TCC)/config.h && rm -f $(TCC)/config.h.bak
+	cd $(TCC) && cc -DC2STR conftest.c -o c2str.exe
+	cd $(TCC) && PATH=$(CURDIR)/build:$$PATH $(MAKE) -j$(JOBS) riscv32-libtcc1-usegcc=yes
+
+# the on-board tree: /usr/bin/tcc, its libtcc1.a and headers, musl's headers, crt files, libc.a, libgcc.a
+build/tccroot/usr/bin/tcc: $(TCC)/tcc tools/stage_tcc.py
+	python3 tools/stage_tcc.py --tinycc $(TCC) --sysroot $(SYSROOT) --libgcc "$$(build/rv32-gcc -print-libgcc-file-name)" \
+	  --gcc $(CURDIR)/build/rv32-gcc --strip $(CROSS)strip --out build/tccroot
+
 # The base romfs has no /sbin/init (this busybox has no init applet): tools/romfs_add.py adds a shell-script init
 # that mounts /proc and /sys and starts a shell, replaces /bin/busybox with the one built above, links every applet
 # to it and installs the udhcpc script.
@@ -115,25 +137,25 @@ $(BB)/busybox: build/busybox-$(BUSYBOX_VER).tar.bz2 build/rv32-gcc userland/busy
 images/sonata-logo.rgb565: tools/gen_logo.py ../../sonata-lib/font8x8_basic.h
 	python3 tools/gen_logo.py $@ ../rtl
 
-images/rootfs.romfs: tools/romfs_add.py $(ROOTFS_BASE) $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo
-	python3 -I tools/romfs_add.py $(ROOTFS_BASE) $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \
+# The root filesystem is defined here and in userland/skeleton: directories, device nodes, /etc, BusyBox + musl,
+# tcc and the examples, /sbin/init (a script made by tools/romfs_add.py, which mounts /proc, /sys and a tmpfs /tmp).
+images/rootfs.romfs: tools/romfs_add.py $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo userland/fbget userland/cc \
+	  build/tccroot/usr/bin/tcc $(wildcard userland/examples/*) $(wildcard userland/skeleton/etc/*)
+	python3 -I tools/romfs_add.py - $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \
+	  --dir /tmp --dir /proc --dir /sys --dir /dev --dir /root --dir /mnt --dir /usr/sbin --dir /var \
+	  --dev /dev/console=c:5:1 --dev /dev/null=c:1:3 --dev /dev/zero=c:1:5 --dev /dev/tty=c:5:0 --dev /dev/fb0=c:29:0 \
 	  --udhcpc-script $(BB)/examples/udhcp/simple.script \
-	  --file /usr/share/sonata-logo.rgb565=images/sonata-logo.rgb565 --file /usr/bin/showlogo=userland/showlogo:x
+	  --file /usr/share/sonata-logo.rgb565=images/sonata-logo.rgb565 --file /usr/bin/showlogo=userland/showlogo:x \
+	  --file /usr/bin/fbget=userland/fbget:x --file /usr/bin/cc=userland/cc:x --tree build/tccroot=/ --tree userland/examples=/usr/share/examples \
+	  --tree userland/skeleton=/ --symlink /etc/resolv.conf=/proc/net/pnp
 
-# Sizes come from the files: flash_write needs the exact length, flash_erase_range the length rounded up to the
-# 64 KB erase sector, and mem_cmp counts 32-bit words.
+# The BIOS command tftpflash streams a TFTP file into the flash (it erases, writes and verifies one 64 KB block at a
+# time), so no size is needed and nothing has to fit in RAM.
 flash:
 	@echo "tools/tftpd.py <dir containing the images> serves TFTP on this machine (the DIP switches select the server"
 	@echo "by its last octet). At the BIOS prompt (press ESC at the boot countdown):"
-	@for f in kernel.bin:0x0:0x02000000 rootfs.romfs:0x5C0000:0x025C0000; do \
-	  name=$${f%%:*}; rest=$${f#*:}; off=$${rest%%:*}; map=$${rest#*:}; \
-	  size=$$(wc -c < images/$$name | tr -d ' '); \
-	  erase=$$(printf '0x%x' $$(( ($$size + 0xffff) / 0x10000 * 0x10000 ))); \
-	  echo "  tftpget $$name 0x40000000          # must print: loaded $$size bytes"; \
-	  echo "  flash_erase_range $$off $$erase"; \
-	  echo "  flash_write $$off 0x40000000 $$size"; \
-	  echo "  mem_cmp $$map 0x40000000 $$(( $$size / 4 ))   # words; must print: same content"; \
-	done
+	@echo "  tftpflash kernel.bin 0x0               # $$(wc -c < images/kernel.bin | tr -d ' ') bytes; the kernel_a partition holds 0x540000"
+	@echo "  tftpflash rootfs.romfs 0x5C0000        # $$(wc -c < images/rootfs.romfs | tr -d ' ') bytes; the rootfs partition holds 0x1A40000"
 	@echo "  reboot        # boots Linux from flash with no network"
 
 clean:
