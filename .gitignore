@@ -4,3 +4,4 @@ build.cmake.log
 build-deps/
 build-release/
 __pycache__/
+ci-work/

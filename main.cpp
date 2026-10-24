@@ -102,6 +102,8 @@ struct Project {
     QString abs(const QString& p) const { return QDir::isAbsolutePath(p) ? p : QDir(dir).filePath(p); }
     // {root} is the checkout, {deps} the submodules, {prefix} where scripts/build-deps.sh installs; both sit
     // next to build/ like sta/ and projects/
+    // --work DIR: the work directory of whichever project is loaded, in place of its own (used by scripts/ci-flow.sh)
+    static inline QString workOverride;
     // Inside synthgui.app (Contents/MacOS/synthgui) the same tree lives in Contents/Resources.
     static QString repoRoot() {
         const QString app = QCoreApplication::applicationDirPath();
@@ -143,6 +145,7 @@ struct Project {
         dir = QFileInfo(file).absolutePath();
         for (auto it = o.begin(); it != o.end(); ++it)
             if (it.value().isString()) vars[it.key()] = expandHome(it.value().toString());
+        if (!workOverride.isEmpty()) vars["work"] = workOverride;
         name = vars.value("name", QFileInfo(file).baseName());
         top = vars.value("top");
         work = abs(vars.value("work", "build"));
@@ -1889,11 +1892,13 @@ int main(int argc, char** argv) {
     cl.addOption({"set-option", "turn an option on with this value, or off with an empty one, and save it in the "
                                 "project (repeatable; keys as in the project's \"options\")", "key=value"});
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
+    cl.addOption({"work", "use this work directory instead of the project's own", "dir"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
     QCommandLineOption selftest("selftest-new", "fill and create a new project: name,out.json,work,xdc,src...", "fields");
     selftest.setFlags(QCommandLineOption::HiddenFromHelp);
     cl.addOption(selftest);
     cl.process(app);
+    if (cl.isSet("work")) Project::workOverride = QDir(cl.value("work")).absoluteFilePath(".");
     Project p;
     QString err;
     QString file = cl.value("project");

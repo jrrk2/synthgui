@@ -8,6 +8,9 @@
 #
 # The long designs (cdc6000, the Ethernet SoCs, the ROM-Linux SoCs; half an hour or more each) run weekly, or on demand: Actions, "flow", Run
 # workflow, projects "long", "all" or a list of names.
+#
+# Besides each step exiting 0, scripts/ci-flow.sh checks that nextpnr met every clock target and that the FASM and frames are
+# the ones recorded in ci/expected/<platform>.txt.  The quick set also runs on macOS arm64, the platform the release is built on.
 name: flow
 
 on:
@@ -23,6 +26,7 @@ on:
       - deps/**
       - scripts/build-deps.sh
       - scripts/ci-flow.sh
+      - ci/**
       - .github/workflows/flow.yml
   pull_request:
     paths: *source
@@ -52,6 +56,8 @@ env:
   QUICK: >-
     sonata_johnson sonata_telegraph sonata_lcd sonata_bramtest sonata_hyperram
     johnson counter vc707_calc vc707_bramtest
+  # vc707_ethmin is with the long designs because nextpnr's placer had not finished it after 48 minutes on a runner (the other
+  # Virtex-7 projects take 10 to 90 seconds); it comes back to QUICK when that is understood
   LONG: cdc6000 vc707_cdc_eth vc707_ethmin vc707_romlinux sonata_romlinux
 
 jobs:
@@ -165,6 +171,65 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: flow-${{ matrix.project }}
+          path: ci-out
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The release is built on macOS arm64, so the quick set runs there too, in one job (the tools are built once per set of
+  # submodule commits, as above).  continue-on-error until it has been green once: it has not run on GitHub's macOS image yet.
+  macos:
+    name: flow on macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 360
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packages
+        run: brew install qt cmake ninja boost eigen autoconf automake libtool bison flex help2man tcl-tk@8 swig libffi pkgconf jq
+
+      - name: Cache key (submodule commits, build-deps.sh)
+        id: key
+        run: echo "key=tools-mac-v1-$(git ls-tree HEAD deps/ | shasum -a 256 | cut -c1-16)-${{ hashFiles('scripts/build-deps.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the tools
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: *tools
+
+      - name: Build the tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1
+          scripts/build-deps.sh verilator prjxray nextpnr fasm2netlist sta
+          rm -f build-deps/prefix/bin/*_dbg
+
+      # saved here, not at the end of the job: a project that fails must not throw the build away
+      - name: Save the tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: *tools
+
+      - name: prjxray-db
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: git submodule update --init --depth 1 deps/prjxray-db
+
+      - name: Build synthgui
+        run: cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" && cmake --build build
+
+      - name: Run the flow
+        timeout-minutes: 45
+        run: ARTIFACTS=ci-out scripts/ci-flow.sh $QUICK
+
+      - name: Keep the logs and bitstreams
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-macos
           path: ci-out
           retention-days: 14
           if-no-files-found: ignore

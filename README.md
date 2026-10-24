@@ -187,6 +187,15 @@ project, every step but programming, its logs and bitstream kept as an artifact 
 `scripts/ci-flow.sh PROJECT...` is that run, and works locally too. The tools are built once per set of submodule commits
 and cached. The long designs (cdc6000, the Ethernet and ROM-Linux SoCs) run weekly, or from *Run workflow* with projects `long`.
 
+Each project is also checked for what a step's exit status does not say: nextpnr met every clock target, and the FASM and
+frames are the ones recorded for the platform in `ci/expected/<platform>.txt` (`Darwin-arm64.txt`, `Linux-x86_64.txt`). The
+same inputs give the same FASM and frames on a machine, so a changed hash means a changed flow (a tool, a project, a
+submodule); if that is intended, `CI_BASELINE=update scripts/ci-flow.sh PROJECT...` records the new hashes, to be committed.
+A platform with no file is not checked for the hashes. The jobs upload `hashes.txt` (same format) with the logs, to refresh
+a platform from its runner. `scripts/ci-flow.sh` runs in `ci-work/`, not the project's own work directory, so it is safe to
+run on a development machine. The quick set also runs on macOS arm64, the release platform, in one job that does not fail
+the run yet: it has not been through a GitHub runner.
+
 ### Linux package
 
     scripts/package-linux.sh                    # build-release/synthgui-VERSION-linux-x86_64{/,.tar.gz}
