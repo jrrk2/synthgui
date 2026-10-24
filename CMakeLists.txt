@@ -9,7 +9,7 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # the converters the pipeline runs as `synthgui --tool NAME` (tools/): the bitstream path needs no Python
 set(SYNTHGUI_TOOLS tools/fasm2frames/fasm2frames.cpp tools/bit2uf2/bit2uf2.cpp tools/sta_prep/sta_prep.cpp tools/bram_fom/bram_fom.cpp)
-set(SYNTHGUI_VERSION "0.1.0" CACHE STRING "version shown in the app bundle")
+set(SYNTHGUI_VERSION "0.1.1" CACHE STRING "version shown in the app bundle")
 option(SYNTHGUI_BUNDLE "build synthgui.app (scripts/package-macos.sh) instead of the bare build/synthgui" OFF)
 if(SYNTHGUI_BUNDLE)
     add_executable(synthgui MACOSX_BUNDLE main.cpp ${SYNTHGUI_TOOLS})

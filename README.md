@@ -187,5 +187,5 @@ databases, fasm2netlist, `xc7frames2bit`, OpenSTA with Tcl's script library, ope
 parts of prjxray-db; `FAMILIES="artix7 virtex7 kintex7"` changes that), signs every Mach-O with your Developer ID
 Application identity and the hardened runtime, and writes `synthgui-VERSION-macos-arm64.zip`. There is no Python in it.
 With `NOTARY_PROFILE=name` (made once with `xcrun notarytool store-credentials name`) it notarizes and staples as well.
-The bundle runs from any location, with nothing from Homebrew: perl (`/usr/bin/perl`, for verilator) and the macOS system
-libraries are the only things it uses from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.
+The bundle runs from any location, with nothing from Homebrew and no Perl or Python: only the macOS system libraries and
+the basic shell utilities come from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.

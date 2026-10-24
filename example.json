@@ -26,7 +26,7 @@
     "OBUF",
     "RAMB36E1"
   ],
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
   "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",

@@ -94,7 +94,7 @@
     }
   ],
   "top": "vc707_cdc_eth",
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/cdc6000_eth",
   "xdc": "{root}/projects/cdc6000_eth-src/vc707_cdc_nextpnr.xdc",

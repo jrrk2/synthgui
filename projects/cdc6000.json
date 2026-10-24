@@ -74,7 +74,7 @@
     }
   ],
   "top": "vc707_cdc_top",
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/cdc6000",
   "xdc": "{root}/projects/cdc6000-src/vc707.xdc",

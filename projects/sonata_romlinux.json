@@ -94,7 +94,7 @@
     }
   ],
   "top": "gen_soc",
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/sonata_romlinux",
   "xdc": "{root}/projects/sonata_romlinux-src/gen_soc.xdc",

@@ -6,7 +6,7 @@
 DEST gets the same layout the checkout has beside build/, because synthgui's {root}/{deps}/{prefix}/{builds} are
 resolved from it (Project::repoRoot):
 
-    build-deps/prefix/{bin,share}      verilator, sta, openFPGALoader
+    build-deps/prefix/{bin,share}      verilator_bin, sta, openFPGALoader
     build-deps/nextpnr/                nextpnr-himbaechel and the chip databases
     build-deps/fasm2netlist/           tileverilog, lvs_equiv
     build-deps/prjxray/tools/          xc7frames2bit
@@ -15,8 +15,7 @@ resolved from it (Project::repoRoot):
                                        default artix7 virtex7)
 
 Everything is copied from this checkout's build-deps/ and deps/ (scripts/build-deps.sh builds them). No file under
-/opt/homebrew is referenced afterwards. System perl (/usr/bin/perl, for verilator) and the macOS system libraries are the
-only things used from the host. There is no Python: the converters the flow needs (FASM to frames, UF2, the STA and block
+/opt/homebrew is referenced afterwards. Only the macOS system libraries and the basic shell utilities are used from the host. There is no Python: the converters the flow needs (FASM to frames, UF2, the STA and block
 RAM scripts) are built into synthgui itself (`synthgui --tool NAME`, see tools/), so the bundle holds only the tools that
 have their own maintainers, each as its own executable.
 """
@@ -94,7 +93,9 @@ def main():
 
     # ---- tools
     pre = BD / "prefix"
-    for b in ("verilator", "verilator_bin", "sta", "openFPGALoader"):
+    # verilator_bin, not the Perl wrapper `verilator`: with VERILATOR_ROOT set by the project it does the same work (checked byte
+    # for byte on the Sonata and VC707 designs), and the bundle then needs no Perl
+    for b in ("verilator_bin", "sta", "openFPGALoader"):
         copy(pre / "bin" / b, bd / "prefix" / "bin" / b)
     copy(pre / "share" / "verilator", bd / "prefix" / "share" / "verilator")
     copy(pre / "share" / "openFPGALoader", bd / "prefix" / "share" / "openFPGALoader")

@@ -105,7 +105,7 @@
   ],
   "tileverilog": "{builds}/fasm2netlist/tileverilog",
   "top": "xilinx_vc707",
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/vc707_romlinux",
   "xdc": "{root}/projects/vc707_romlinux-src/xilinx_vc707.xdc",

@@ -84,7 +84,7 @@
     }
   ],
   "top": "top",
-  "verilator": "{prefix}/bin/verilator",
+  "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
   "work": "~/synthgui-work/sonata_bramtest",
   "xdc": "{root}/projects/sonata_bramtest-src/top.xdc",

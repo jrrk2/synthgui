@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 QT=${QT_PREFIX:-/opt/homebrew/opt/qt}
-VER=${SYNTHGUI_VERSION:-0.1.0}
+VER=${SYNTHGUI_VERSION:-0.1.1}
 B=build-release
 APP=$B/synthgui.app
 ID=${SIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}
