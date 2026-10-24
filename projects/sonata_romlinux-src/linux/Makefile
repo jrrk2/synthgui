@@ -163,11 +163,16 @@ images/rootfs.romfs: tools/romfs_add.py $(BB)/busybox images/sonata-logo.rgb565 
 
 # The BIOS command tftpflash streams a TFTP file into the flash (it erases, writes and verifies one 64 KB block at a
 # time), so no size is needed and nothing has to fit in RAM.
-flash:
+# The partitions are the device tree's MTD table (kernel/sonata-ram.dts): the BIOS's copy is generated from it, so
+# `tftpflash <file> <partition>` writes where Linux reads.
+../bios/partitions.h: kernel/sonata-ram.dts tools/dts_partitions.py
+	python3 tools/dts_partitions.py $< $@
+
+flash: ../bios/partitions.h
 	@echo "tools/tftpd.py <dir containing the images> serves TFTP on this machine (the DIP switches select the server"
 	@echo "by its last octet). At the BIOS prompt (press ESC at the boot countdown):"
-	@echo "  tftpflash kernel.bin 0x0               # $$(wc -c < images/kernel.bin | tr -d ' ') bytes; the kernel_a partition holds 0x540000"
-	@echo "  tftpflash rootfs.romfs 0x5C0000        # $$(wc -c < images/rootfs.romfs | tr -d ' ') bytes; the rootfs partition holds 0x1A40000"
+	@echo "  tftpflash kernel.bin kernel            # $$(wc -c < images/kernel.bin | tr -d ' ') bytes"
+	@echo "  tftpflash rootfs.romfs rootfs          # $$(wc -c < images/rootfs.romfs | tr -d ' ') bytes"
 	@echo "  reboot        # boots Linux from flash with no network"
 
 clean:

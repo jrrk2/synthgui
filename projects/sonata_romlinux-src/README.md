@@ -71,13 +71,18 @@ pythondata-software-picolibc and -compiler_rt; `riscv64-elf-gcc` with an rv32 mu
 6. **Flash them.** Serve `linux/images/` over TFTP (`python3 linux/tools/tftpd.py linux/images`, then set the DIP
    switches to the server's last octet), reset, press ESC at the boot countdown, and at the BIOS prompt:
 
-       tftpflash kernel.bin 0x0
-       tftpflash rootfs.romfs 0x5C0000
+       tftpflash kernel.bin kernel
+       tftpflash rootfs.romfs rootfs
        reboot
 
-   `tftpflash <file> <flash offset>` (a multiple of 0x10000) streams the file into the flash: it collects 64 KB, erases
-   that block, writes and verifies it, and goes on, so the file size is limited only by the flash (the `kernel_a`
-   partition is 0x540000 bytes, `rootfs` 0x1A40000) and nothing has to fit in the 8 MB of RAM. It prints
+   `tftpflash <file> <partition>` streams the file into the flash partition of that name; the names and offsets are the
+   device tree's MTD table (`linux/kernel/sonata-ram.dts`: `kernel` 0x0, `opensbi` 0x540000, `rootfs` 0x5C0000), so it
+   writes where Linux reads. The BIOS's copy of the table, `bios/partitions.h`, is generated from the device tree by
+   `linux/tools/dts_partitions.py` (`make -C linux ../bios/partitions.h`) and the BIOS has to be rebuilt after the
+   table changes. `tftpflash` with no arguments lists the partitions; a plain offset (a multiple of 0x10000) still works.
+   It collects 64 KB, erases that block, writes and verifies it, and goes on, so the file size is limited only by the
+   partition (it stops with an error if the file is larger; only the low 16 MB of the flash are addressable) and nothing
+   has to fit in the 8 MB of RAM. It prints
    `N bytes written and verified at flash ...` when done. Do not reset while it runs; an interrupted write leaves a
    corrupt partition, recovered by flashing again from the BIOS prompt. `make -C linux flash` prints the commands.
    The TFTP server must tolerate pauses (a block takes a second or so to flash) and ignore duplicate ACKs; the

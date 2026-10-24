@@ -635,6 +635,7 @@ static void send_udp(const uint8_t *dst_mac, uint32_t dst_ip,
 
 static int tftp_flash = 0;
 static uint32_t tflash_off = 0;      // flash offset of the erase block being collected
+static uint32_t tflash_end = 0;      // end of the partition being written: the file must not go past it
 static uint32_t tflash_fill = 0;
 static uint32_t tflash_total = 0;
 static int tflash_err = 0;
@@ -671,6 +672,10 @@ static void tflash_flush(void) {
 
 static void tflash_feed(const uint8_t *p, uint16_t n) {
   tflash_total += n;
+  if (!tflash_err && tflash_off + tflash_fill + n > tflash_end) {
+    printf("tftpflash: file is larger than the partition (ends at 0x%08lx)\n", (unsigned long)tflash_end);
+    tflash_err = 1;
+  }
   while (n && !tflash_err) {
     uint32_t room = TFLASH_BLOCK - tflash_fill;
     uint32_t k = n < room ? n : room;
@@ -997,9 +1002,9 @@ void spieth_tftp_boot(void) {
   spieth_tftp_run();
 }
 #ifdef CSR_SPIFLASH_MASTER_CS_ADDR
-void spieth_tftp_flash(const char *fn, unsigned long flash_off) {
+void spieth_tftp_flash(const char *fn, unsigned long flash_off, unsigned long flash_end) {
   tftp_fn = fn; tftp_noboot = 1;
-  tftp_flash = 1; tflash_off = flash_off; tflash_fill = 0; tflash_total = 0; tflash_err = 0; tflash_skipped = 0;
+  tftp_flash = 1; tflash_off = flash_off; tflash_end = flash_end; tflash_fill = 0; tflash_total = 0; tflash_err = 0; tflash_skipped = 0;
   spieth_tftp_run();
   tftp_flash = 0;
 }

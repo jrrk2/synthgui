@@ -44,6 +44,6 @@ void sdcardboot(int nb_params, char **params);
 void sataboot(int nb_params, char **params);
 void spieth_tftp_boot(void);
 void spieth_tftp_get(const char *fn, unsigned long addr);
-void spieth_tftp_flash(const char *fn, unsigned long flash_off);
+void spieth_tftp_flash(const char *fn, unsigned long flash_off, unsigned long flash_end);
 
 #endif /* __BOOT_H */

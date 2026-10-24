@@ -9,3 +9,6 @@ echo "  MMU, single hart, 8 MB HyperRAM"
 echo "========================================"
 uname -a
 echo
+# A slideshow of the built-in pictures on the LCD (/usr/share/photobox). It keeps /dev/fb0 open, so the text console
+# stays hidden; `killall photobox` stops it and the console comes back.
+photobox 10 </dev/null >/dev/null 2>&1 &

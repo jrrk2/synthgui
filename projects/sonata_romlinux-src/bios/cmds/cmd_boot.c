@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <generated/csr.h>
 #include <generated/soc.h>
@@ -159,20 +160,44 @@ static void tftpget_handler(int nb_params, char **params)
 define_command(tftpget, tftpget_handler, "Fetch a file via SPI Ethernet TFTP into RAM", BOOT_CMDS);
 
 #if defined(CSR_SPIFLASH_MASTER_CS_ADDR)
+#include "../partitions.h"
+#define TFLASH_WINDOW 0x1000000UL	/* the flash is read in place through a 24-bit window: the low 16 MB */
+
+static void tftpflash_usage(void)
+{
+	unsigned i;
+	printf("tftpflash <file> <partition | flash offset (multiple of 0x10000)>\n  partitions (the device tree's MTD table):\n");
+	for (i = 0; i < sizeof(tflash_parts) / sizeof(tflash_parts[0]); i++)
+		printf("    %-8s 0x%06lx  size 0x%lx\n", tflash_parts[i].label, tflash_parts[i].off, tflash_parts[i].size);
+}
+
 static void tftpflash_handler(int nb_params, char **params)
 {
 	char *c;
-	unsigned long off;
+	unsigned long off = 0, end = TFLASH_WINDOW;
+	unsigned i;
+	int found = 0;
 	if (nb_params < 2) {
-		printf("tftpflash <file> <flash offset, multiple of 0x10000>\n");
+		tftpflash_usage();
 		return;
 	}
-	off = strtoul(params[1], &c, 0);
-	if (*c != 0 || (off & 0xffff) || off >= 0x1000000) {
-		printf("Incorrect flash offset (a multiple of 0x10000 below 0x1000000)\n");
-		return;
+	for (i = 0; i < sizeof(tflash_parts) / sizeof(tflash_parts[0]); i++)
+		if (!strcmp(params[1], tflash_parts[i].label)) {
+			off = tflash_parts[i].off;
+			end = off + tflash_parts[i].size;
+			found = 1;
+		}
+	if (!found) {
+		off = strtoul(params[1], &c, 0);
+		if (*c != 0 || (off & 0xffff) || off >= TFLASH_WINDOW) {
+			printf("Unknown partition or bad offset '%s'\n", params[1]);
+			tftpflash_usage();
+			return;
+		}
 	}
-	spieth_tftp_flash(params[0], off);
+	if (end > TFLASH_WINDOW)
+		end = TFLASH_WINDOW;
+	spieth_tftp_flash(params[0], off, end);
 }
 define_command(tftpflash, tftpflash_handler, "Stream a TFTP file into the flash (erase, write, verify)", BOOT_CMDS);
 #endif
