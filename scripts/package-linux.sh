@@ -76,6 +76,11 @@ mkdir -p "$OUT/projects"
 tar -C projects --exclude linux --exclude '*.log' --exclude '*.bin' -cf - . | tar -C "$OUT/projects" -xf -
 cp example.json "$OUT/"
 cp scripts/README-Linux.txt "$OUT/"
+# the icon and a menu entry: bin/synthgui runs without them, install-desktop.sh puts them in the user's menu
+mkdir -p "$OUT/share/icons"
+cp assets/icon/synthgui-{16,24,32,48,64,128,256,512}.png "$OUT/share/icons/"
+cp assets/synthgui.desktop "$OUT/share/"
+cp assets/install-desktop.sh "$OUT/"
 # no debug information in the shipped programs
 strip --strip-debug "$OUT"/bin/synthgui "$OUT"/lib/*.so* "$OUT/$BD"/nextpnr/nextpnr-himbaechel \
     "$OUT/$BD"/fasm2netlist/* "$OUT/$BD"/prjxray/tools/* "$OUT/$BD"/prefix/bin/{verilator_bin,sta,openFPGALoader}

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=synthgui
+GenericName=Open FPGA flow
+Comment=Qt front end for Verilator, nextpnr, prjxray and openFPGALoader
+Exec=synthgui
+Icon=synthgui
+Terminal=false
+Categories=Development;Electronics;
+Keywords=FPGA;Verilog;nextpnr;Xilinx;

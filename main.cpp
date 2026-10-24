@@ -14,6 +14,7 @@
 //                                                     render one view from existing results and exit
 
 #include <QApplication>
+#include <QIcon>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QGroupBox>
@@ -1874,6 +1875,11 @@ int main(int argc, char** argv) {
         return 2;
     }
     QApplication app(argc, argv);
+    {   // the OpenXC7 logo (assets/): title bar, taskbar, and the Dock when not started from synthgui.app
+        QIcon appIcon;
+        for (int s : {16, 24, 32, 48, 64, 128, 256}) appIcon.addFile(QString(":/icon/synthgui-%1.png").arg(s), QSize(s, s));
+        app.setWindowIcon(appIcon);
+    }
     QCommandLineParser cl;
     cl.addHelpOption();
     cl.addOption({"project", "project file (JSON)", "file"});

@@ -1,0 +1,2 @@
+// The icon of synthgui.exe, which File Explorer and the taskbar show (CMakeLists.txt configures this into the build directory)
+IDI_ICON1 ICON "@SYNTHGUI_ICO@"

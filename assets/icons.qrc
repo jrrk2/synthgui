@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- the window icon (title bar, taskbar, Dock when not run from the .app); assets/make-icons.py writes the PNGs -->
+  <qresource prefix="/">
+    <file>icon/synthgui-16.png</file>
+    <file>icon/synthgui-24.png</file>
+    <file>icon/synthgui-32.png</file>
+    <file>icon/synthgui-48.png</file>
+    <file>icon/synthgui-64.png</file>
+    <file>icon/synthgui-128.png</file>
+    <file>icon/synthgui-256.png</file>
+  </qresource>
+</RCC>

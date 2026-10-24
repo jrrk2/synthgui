@@ -16,6 +16,8 @@ most of them. Install the rest once with
         libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-util1 \
         libxcb-xfixes0 libxcb-xinput0 libxcb-xkb1
 
+To put synthgui, with its icon, in your application menu, run ./install-desktop.sh once (it writes to ~/.local/share only).
+
 Start bin/synthgui. The folder can live anywhere, but keep it together: synthgui finds the tools, the chip databases
 and the example projects (projects/) relative to bin/. Headless batch runs work with QT_QPA_PLATFORM=offscreen:
 
