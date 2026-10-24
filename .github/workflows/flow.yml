@@ -6,7 +6,7 @@
 # when one of those changes (an hour or two); otherwise a run takes minutes. Each project is its own job
 # (scripts/ci-flow.sh), with its logs and bitstream kept as an artifact.
 #
-# The long designs (cdc6000, the ROM-Linux SoCs; an hour or more each) run weekly, or on demand: Actions, "flow", Run
+# The long designs (cdc6000, the Ethernet SoCs, the ROM-Linux SoCs; half an hour or more each) run weekly, or on demand: Actions, "flow", Run
 # workflow, projects "long", "all" or a list of names.
 name: flow
 
@@ -51,8 +51,8 @@ env:
     qt6-base-dev libgl-dev jq
   QUICK: >-
     sonata_johnson sonata_telegraph sonata_lcd sonata_bramtest sonata_hyperram
-    johnson counter vc707_calc vc707_ethmin vc707_bramtest
-  LONG: cdc6000 vc707_cdc_eth vc707_romlinux sonata_romlinux
+    johnson counter vc707_calc vc707_bramtest
+  LONG: cdc6000 vc707_cdc_eth vc707_ethmin vc707_romlinux sonata_romlinux
 
 jobs:
   tools:
@@ -125,7 +125,8 @@ jobs:
   flow:
     needs: tools
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    # a push runs the quick set, each a few minutes: a hang (nextpnr has hung in global routing) fails within the hour
+    timeout-minutes: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 45 || 360 }}
     strategy:
       fail-fast: false
       matrix:

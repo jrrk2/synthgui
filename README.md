@@ -185,7 +185,7 @@ and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --pre
 changes the source (GUI, `tools/`, `projects/`, `xc7/`, `sta/`, the submodule pointers, `build-deps.sh`): one job per
 project, every step but programming, its logs and bitstream kept as an artifact and a step table in the job summary.
 `scripts/ci-flow.sh PROJECT...` is that run, and works locally too. The tools are built once per set of submodule commits
-and cached. The long designs (cdc6000, the ROM-Linux SoCs) run weekly, or from *Run workflow* with projects `long`.
+and cached. The long designs (cdc6000, the Ethernet and ROM-Linux SoCs) run weekly, or from *Run workflow* with projects `long`.
 
 ### Linux package
 
