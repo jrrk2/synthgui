@@ -76,6 +76,7 @@ tar -C projects --exclude linux --exclude '*.log' -cf - . | tar -C "$OUT/project
 cp example.json "$OUT/"
 # how to run it, and the one-off WinUSB driver step openFPGALoader needs
 cp scripts/README-Windows.txt "$OUT/"
+cp LICENSE "$OUT/"   # GPL-3.0, which goes with the binaries
 # no debug information in the shipped programs (nextpnr is 180 MB with it, 6 without). Not openFPGALoader: it has
 # little (0.5 MB), and Smart App Control blocked the stripped copy while it let the one built here run
 strip --strip-debug "$OUT"/bin/*.exe "$OUT/$BD"/{nextpnr,fasm2netlist,prjxray/tools}/*.exe \

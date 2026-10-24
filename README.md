@@ -252,3 +252,30 @@ Application identity and the hardened runtime, and writes `synthgui-VERSION-maco
 With `NOTARY_PROFILE=name` (made once with `xcrun notarytool store-credentials name`) it notarizes and staples as well.
 The bundle runs from any location, with nothing from Homebrew and no Perl or Python: only the macOS system libraries and
 the basic shell utilities come from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.
+
+## Code signing policy
+
+Windows releases are built from this repository's source by `.github/workflows/windows-release.yml` on GitHub-hosted
+runners, and are to be signed by [SignPath Foundation](https://signpath.org) through [SignPath.io](https://signpath.io)
+(applied for; until then the Windows zip is unsigned and says so in its release notes). Only synthgui's own program,
+`bin/synthgui.exe`, is signed. The tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader,
+fasm2netlist) and the MINGW64 and Qt libraries are other projects' builds, made from source in the same workflow, and
+are not signed.
+
+Team roles:
+
+- Committers and reviewers: Jonathan Kimmitt (jrrk2)
+- Approvers: Jonathan Kimmitt (jrrk2)
+
+Every signing request is approved by hand.
+
+Privacy policy: this program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it.
+
+## Licence
+
+synthgui is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License,
+version 3, as published by the Free Software Foundation (`LICENSE`). Files that carry their own licence notice keep it:
+yosys's Xilinx cell models in `xc7/` and the prjxray rules ported into `tools/fasm2frames` (ISC), and third-party HDL
+in the example projects (`projects/`; for example ISC, MIT and Apache-2.0). The tools in `deps/` are separate projects
+under their own licences.
