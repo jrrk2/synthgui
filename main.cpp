@@ -51,7 +51,11 @@
 #include <QMap>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <cstring>
 #include <QProcess>
+#include <QMetaObject>
+#include <QThread>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSet>
 #include <QShortcut>
@@ -69,6 +73,13 @@
 #include <QWheelEvent>
 
 #include "options.h"
+#include "tools/common/toolio.hpp"
+
+// tools/: the converters the pipeline steps run as `synthgui --tool NAME`
+int fasm2frames_main(int argc, char** argv);
+int bit2uf2_main(int argc, char** argv);
+int sta_prep_main(int argc, char** argv);
+int bram_fom_main(int argc, char** argv);
 
 // ---------------------------------------------------------------- project
 
@@ -90,7 +101,22 @@ struct Project {
     QString abs(const QString& p) const { return QDir::isAbsolutePath(p) ? p : QDir(dir).filePath(p); }
     // {root} is the checkout, {deps} the submodules, {prefix} where scripts/build-deps.sh installs; both sit
     // next to build/ like sta/ and projects/
-    static QString repoRoot() { return QDir(QCoreApplication::applicationDirPath() + "/..").absolutePath(); }
+    // Inside synthgui.app (Contents/MacOS/synthgui) the same tree lives in Contents/Resources.
+    static QString repoRoot() {
+        const QString app = QCoreApplication::applicationDirPath();
+        if (app.endsWith("/Contents/MacOS")) return QDir(app + "/../Resources").absolutePath();
+        return QDir(app + "/..").absolutePath();
+    }
+    // Inside synthgui.app the tools sit in Contents/Resources/build-deps (scripts/bundle-tools.py): steps run with
+    // them first on PATH.
+    static bool bundled() { return QCoreApplication::applicationDirPath().endsWith("/Contents/MacOS"); }
+    static QProcessEnvironment bundledEnvironment() {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        const QString b = repoRoot() + "/build-deps";
+        env.insert("PATH", b + "/prefix/bin:" + env.value("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"));
+        env.insert("TCL_LIBRARY", b + "/prefix/lib/tcl8.6");
+        return env;
+    }
     static QString expandHome(QString s) {
         if (s.startsWith("~/")) s = QDir::homePath() + s.mid(1);
         s.replace("{root}", repoRoot());
@@ -154,11 +180,11 @@ struct Project {
         vars["bit"] = work + "/" + top + ".bit";
         vars["routed"] = work + "/" + top + "_routed.json";
         vars["sdf"] = work + "/" + top + ".sdf";
-        if (!vars.contains("sta_prep"))  // sta/ next to build/
-            vars["sta_prep"] = QDir(QCoreApplication::applicationDirPath() + "/../sta").absoluteFilePath("nextpnr_sta.py");
-        if (!vars.contains("bram_fom"))  // the block RAM figure of merit, from nextpnr's CI
-            vars["bram_fom"] = repoRoot() + "/deps/nextpnr/.github/scripts/bram_fom.py";
         vars["xdc"] = xdc;
+        // the tools built into this program (tools/) are run in-process: a step's command names one as @name
+        for (const char* tool : {"fasm2frames", "bit2uf2", "sta_prep", "bram_fom"})
+            if (!vars.contains(tool)) vars[tool] = QString("@") + tool;
+        if (!vars.contains("frames2bit")) vars["frames2bit"] = repoRoot() + "/build-deps/prjxray/tools/xc7frames2bit";
         // commands run through bash: quote anything the shell would read (32'h... in a define)
         auto q = [](const QString& w) {
             static const QRegularExpression plain("^[A-Za-z0-9_./+=:,@%-]+$");
@@ -480,7 +506,7 @@ public:
         v->addWidget(buttons);
         loadTemplate();
     }
-    static QString projectsDir() { return QDir(QCoreApplication::applicationDirPath() + "/../projects").absolutePath(); }
+    static QString projectsDir() { return QDir(Project::repoRoot() + "/projects").absolutePath(); }
 
     // for --selftest-new: fill the form as a user would, then press Create
     void fill(const QString& name, const QStringList& sources, const QString& xdc, const QString& work, const QString& file) {
@@ -819,8 +845,119 @@ private:
     QPlainTextEdit* m_line = nullptr;
 };
 
+// ---------------------------------------------------------------- built-in tools
+// The converters in tools/ run inside this process, in a worker thread, with their output going to the step's log. A step's
+// command names one as @name (the project variables {fasm2frames}, {bit2uf2}, {sta_prep}, {bram_fom} expand to that) and
+// may chain it with && to other commands; the commands around it are run by bash as before, and a command that names
+// none is passed to bash untouched.
+namespace {
+
+struct Piece {
+    bool builtin;
+    QString text;
+};
+
+// split at && outside quotes and parentheses; consecutive ordinary commands stay together so `cd x && prog` still works
+QList<Piece> splitPieces(const QString& cmd) {
+    QStringList segs;
+    QString cur;
+    QChar q;
+    int depth = 0;
+    bool backtick = false;
+    const int n = cmd.size();
+    for (int i = 0; i < n; i++) {
+        const QChar c = cmd[i];
+        if (q == '\'') { cur += c; if (c == '\'') q = QChar(); continue; }
+        if (q == '"') {
+            cur += c;
+            if (c == '\\' && i + 1 < n) cur += cmd[++i];
+            else if (c == '"') q = QChar();
+            continue;
+        }
+        if (c == '\\' && i + 1 < n) { cur += c; cur += cmd[++i]; continue; }
+        if (c == '\'' || c == '"') { q = c; cur += c; continue; }
+        if (c == '`') backtick = !backtick;
+        if (c == '(') depth++;
+        if (c == ')' && depth > 0) depth--;
+        if (c == '&' && i + 1 < n && cmd[i + 1] == '&' && depth == 0 && !backtick) { segs << cur; cur.clear(); i++; continue; }
+        cur += c;
+    }
+    segs << cur;
+    auto isBuiltin = [](const QString& s) { return s.size() > 1 && s[0] == '@' && s[1].isLetter(); };
+    bool any = false;
+    for (const QString& s : segs) any |= isBuiltin(s.trimmed());
+    if (!any) return {{false, cmd}};
+    QList<Piece> out;
+    QStringList shell;
+    auto flush = [&] { if (!shell.isEmpty()) { out.append({false, shell.join(" && ")}); shell.clear(); } };
+    for (const QString& s : segs) {
+        const QString t = s.trimmed();
+        if (isBuiltin(t)) { flush(); out.append({true, t}); }
+        else shell << t;
+    }
+    flush();
+    return out;
+}
+
+// words the way a shell reads them (quotes and backslashes; no expansion)
+QStringList shellWords(const QString& s) {
+    QStringList out;
+    QString cur;
+    bool have = false;
+    QChar q;
+    for (int i = 0; i < s.size(); i++) {
+        const QChar c = s[i];
+        if (q == '\'') { if (c == '\'') q = QChar(); else cur += c; }
+        else if (q == '"') {
+            if (c == '"') q = QChar();
+            else if (c == '\\' && i + 1 < s.size() && QString("\"\\$`").contains(s[i + 1])) cur += s[++i];
+            else cur += c;
+        }
+        else if (c == '\'' || c == '"') { q = c; have = true; }
+        else if (c == '\\' && i + 1 < s.size()) { cur += s[++i]; have = true; }
+        else if (c.isSpace()) { if (have || !cur.isEmpty()) { out << cur; cur.clear(); have = false; } }
+        else { cur += c; have = true; }
+    }
+    if (have || !cur.isEmpty()) out << cur;
+    return out;
+}
+
+// run a built-in tool by name; its output goes to the calling thread's toolio sink
+int runBuiltinTool(const QString& name, const QStringList& args) {
+    int (*fn)(int, char**) = nullptr;
+    if (name == "fasm2frames") fn = fasm2frames_main;
+    else if (name == "bit2uf2") fn = bit2uf2_main;
+    else if (name == "sta-prep") fn = sta_prep_main;
+    else if (name == "bram-fom") fn = bram_fom_main;
+    if (!fn) {
+        toolio::err("synthgui: no built-in tool '%s'\n", name.toLocal8Bit().constData());
+        return 127;
+    }
+    std::vector<QByteArray> store{name.toLocal8Bit()};
+    for (const QString& a : args) store.push_back(a.toLocal8Bit());
+    std::vector<char*> argv;
+    for (auto& s : store) argv.push_back(s.data());
+    argv.push_back(nullptr);
+    try {
+        return fn((int)store.size(), argv.data());
+    } catch (const toolio::Exit& e) {
+        return e.code;
+    } catch (const std::exception& e) {
+        toolio::err("synthgui: %s: %s\n", name.toLocal8Bit().constData(), e.what());
+        return 1;
+    }
+}
+
+}  // namespace
+
 class MainWindow final : public QMainWindow {
 public:
+    ~MainWindow() override {
+        if (m_toolThread) {            // a built-in tool is still running: let it finish
+            m_toolThread->wait();
+            delete m_toolThread;
+        }
+    }
     explicit MainWindow(Project p) : m_p(std::move(p)) {
         setWindowTitle("synthgui - " + m_p.name);
         resize(1500, 950);
@@ -1126,7 +1263,7 @@ private:
 
     // ---- running the flow
     void runSteps(QList<Step> steps) {
-        if (m_proc) return;
+        if (m_proc || m_toolThread) return;
         if (!confirmUnsaved(dirtyEditors(), "building")) return;
         m_queue = steps;
         next();
@@ -1149,38 +1286,86 @@ private:
         m_logFile.open(QIODevice::WriteOnly | QIODevice::Truncate);
         setStepState(s.id, " " + s.label + ": running ", "#b07000");
         m_t0 = QDateTime::currentMSecsSinceEpoch();
+        m_pieces = splitPieces(cmd);
+        runPiece();
+    }
+    void appendLog(const QByteArray& b) {
+        m_logFile.write(b);
+        m_curLog->moveCursor(QTextCursor::End);
+        m_curLog->insertPlainText(QString::fromLocal8Bit(b));
+        m_curLog->moveCursor(QTextCursor::End);
+    }
+    // the next piece of the step's command: a built-in tool in this process, or commands for bash
+    void runPiece() {
+        if (m_pieces.isEmpty()) { finishStep(0); return; }
+        const Piece p = m_pieces.takeFirst();
+        if (p.builtin) runBuiltin(p.text);
+        else runShell(p.text);
+    }
+    void pieceDone(int code) {
+        if (code || m_pieces.isEmpty()) finishStep(code);
+        else runPiece();
+    }
+    void runShell(const QString& cmd) {
         m_proc = new QProcess(this);
         m_proc->setProcessChannelMode(QProcess::MergedChannels);
         m_proc->setWorkingDirectory(m_p.work);
-        connect(m_proc, &QProcess::readyRead, this, [this] {
-            const QByteArray b = m_proc->readAll();
-            m_logFile.write(b);
-            m_curLog->moveCursor(QTextCursor::End);
-            m_curLog->insertPlainText(QString::fromLocal8Bit(b));
-            m_curLog->moveCursor(QTextCursor::End);
-        });
+        connect(m_proc, &QProcess::readyRead, this, [this] { appendLog(m_proc->readAll()); });
         connect(m_proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus) {
-            m_logFile.close();
-            const double secs = (QDateTime::currentMSecsSinceEpoch() - m_t0) / 1000.0;
-            setStepState(m_cur.id, QString(" %1: %2 (%3 s) ").arg(m_cur.label, code ? "FAILED" : "ok").arg(secs, 0, 'f', 0),
-                         code ? "#c02020" : "#208020");
-            QFile st(m_p.work + "/" + m_cur.id + ".status");
-            if (st.open(QIODevice::WriteOnly)) st.write(QString("%1 %2\n").arg(code).arg(secs, 0, 'f', 0).toUtf8());
             m_proc->deleteLater();
             m_proc = nullptr;
-            refreshAll();
-            if (code) {
-                m_queue.clear();
-                m_results->setCurrentWidget(m_problems);
-                if (m_done) { auto d = m_done; m_done = nullptr; d(false); }
-                return;
-            }
-            next();
+            pieceDone(code);
         });
+        if (Project::bundled()) m_proc->setProcessEnvironment(Project::bundledEnvironment());
         m_proc->start("/bin/bash", {"-c", cmd});
+    }
+    // a worker thread runs the tool; what it prints is posted to this thread, in order, ahead of its result
+    void runBuiltin(const QString& text) {
+        const QStringList words = shellWords(text);
+        const QString name = words.value(0).mid(1).replace('_', '-');
+        const QStringList args = words.mid(1);
+        struct LogSink : toolio::Sink {
+            MainWindow* w;
+            void write(bool, const char* d, size_t n) override {
+                const QByteArray b(d, (qsizetype)n);
+                MainWindow* win = w;
+                QMetaObject::invokeMethod(win, [win, b] { win->appendLog(b); }, Qt::QueuedConnection);
+            }
+        };
+        m_toolThread = QThread::create([this, name, args] {
+            LogSink sink;
+            sink.w = this;
+            toolio::sink = &sink;
+            const int code = runBuiltinTool(name, args);
+            toolio::sink = nullptr;
+            QMetaObject::invokeMethod(this, [this, code] {
+                m_toolThread->wait();
+                delete m_toolThread;
+                m_toolThread = nullptr;
+                pieceDone(code);
+            }, Qt::QueuedConnection);
+        });
+        m_toolThread->start();
+    }
+    void finishStep(int code) {
+        m_logFile.close();
+        const double secs = (QDateTime::currentMSecsSinceEpoch() - m_t0) / 1000.0;
+        setStepState(m_cur.id, QString(" %1: %2 (%3 s) ").arg(m_cur.label, code ? "FAILED" : "ok").arg(secs, 0, 'f', 0),
+                     code ? "#c02020" : "#208020");
+        QFile st(m_p.work + "/" + m_cur.id + ".status");
+        if (st.open(QIODevice::WriteOnly)) st.write(QString("%1 %2\n").arg(code).arg(secs, 0, 'f', 0).toUtf8());
+        refreshAll();
+        if (code) {
+            m_queue.clear();
+            m_results->setCurrentWidget(m_problems);
+            if (m_done) { auto d = m_done; m_done = nullptr; d(false); }
+            return;
+        }
+        next();
     }
     void stop() {
         m_queue.clear();
+        m_pieces.clear();                      // a built-in tool in a worker thread is let finish; nothing follows it
         if (m_proc) m_proc->kill();
     }
 
@@ -1524,12 +1709,26 @@ private:
     QList<Step> m_queue;
     Step m_cur;
     QProcess* m_proc = nullptr;
+    QThread* m_toolThread = nullptr;
+    QList<Piece> m_pieces;
     QFile m_logFile;
     qint64 m_t0 = 0;
     std::function<void(bool)> m_done;
 };
 
 int main(int argc, char** argv) {
+    // tools built in (tools/): run before any GUI exists, so they are quick and work headless
+    if (argc >= 3 && !strcmp(argv[1], "--tool")) {
+        const char* tool = argv[2];
+        char** targv = argv + 2;
+        int targc = argc - 2;
+        if (!strcmp(tool, "fasm2frames")) return fasm2frames_main(targc, targv);
+        if (!strcmp(tool, "bit2uf2")) return bit2uf2_main(targc, targv);
+        if (!strcmp(tool, "sta-prep")) return sta_prep_main(targc, targv);
+        if (!strcmp(tool, "bram-fom")) return bram_fom_main(targc, targv);
+        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom)\n", tool);
+        return 2;
+    }
     QApplication app(argc, argv);
     QCommandLineParser cl;
     cl.addHelpOption();

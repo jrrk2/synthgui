@@ -61,7 +61,10 @@ nextpnr() {
 fasm2netlist() {
     say fasm2netlist
     git -C "$deps/fasm2netlist" submodule update --init --recursive
-    cmake -S "$deps/fasm2netlist" -B "$out/fasm2netlist" -DCMAKE_BUILD_TYPE=Release
+    # CaDiCaL (built statically from its submodule) is the default solver; linking Homebrew's libz3 as well buys only
+    # `--solver libz3` and makes lvs_equiv fail to start when Homebrew moves to another z3 (5.1 -> 5.3 did). LVS_Z3=ON
+    # to link it anyway.
+    cmake -S "$deps/fasm2netlist" -B "$out/fasm2netlist" -DCMAKE_BUILD_TYPE=Release -DLVS_Z3="${LVS_Z3:-OFF}"
     cmake --build "$out/fasm2netlist" --parallel "$jobs"
 }
 

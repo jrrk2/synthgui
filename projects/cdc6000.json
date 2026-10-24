@@ -16,7 +16,6 @@
     "LUTRAM": 130800,
     "RAMB36": 1030
   },
-  "convert": "{root}/xc7/convert.py",
   "defines": [
     "SYNTHESIS"
   ],
@@ -28,7 +27,6 @@
   "openfpgaloader": "{prefix}/bin/openFPGALoader",
   "part": "xc7vx485tffg1761-2",
   "prjxray_db": "{deps}/prjxray-db",
-  "python": "{builds}/venv/bin/python",
   "sources": [
     "{root}/projects/cdc6000-src/cdc_pkg.sv",
     "{root}/projects/cdc6000-src/cdc6000_sb.sv",
@@ -52,10 +50,10 @@
     {
       "id": "fom",
       "label": "Block RAM merit",
-      "command": "{python} {bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+      "command": "{bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
     },
     {
-      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
       "id": "sta",
       "label": "OpenSTA"
     },
@@ -65,7 +63,7 @@
       "label": "LVS"
     },
     {
-      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}",
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}",
       "id": "bit",
       "label": "Bitstream"
     },

@@ -16,7 +16,6 @@
     "LUTRAM": 9600,
     "RAMB36": 75
   },
-  "convert": "{root}/xc7/convert.py",
   "defines": [
     "SYNTHESIS"
   ],
@@ -28,7 +27,6 @@
   "openfpgaloader": "{prefix}/bin/openFPGALoader",
   "part": "xc7a50tcsg324-1",
   "prjxray_db": "{deps}/prjxray-db",
-  "python": "{builds}/venv/bin/python",
   "sources": [
     "{root}/projects/sonata_lcd-src/top.v",
     "{root}/projects/sonata_lcd-src/counter25_core.v",
@@ -52,10 +50,10 @@
     {
       "id": "fom",
       "label": "Block RAM merit",
-      "command": "{python} {bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+      "command": "{bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
     },
     {
-      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
       "id": "sta",
       "label": "OpenSTA"
     },
@@ -65,14 +63,14 @@
       "label": "LVS"
     },
     {
-      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}",
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}",
       "id": "bit",
       "label": "Bitstream"
     },
     {
       "id": "uf2",
       "label": "UF2",
-      "command": "{python} {root}/xc7/bit2uf2.py {bit} {work}/{top}.bit.slot1.uf2 --slot 1"
+      "command": "{bit2uf2} {bit} {work}/{top}.bit.slot1.uf2 --slot 1"
     },
     {
       "command": "{openfpgaloader} -c ft4232 {bit}",

@@ -32,8 +32,6 @@
   "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
   "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60",
   "prjxray_db": "{deps}/prjxray-db",
-  "python": "{builds}/venv/bin/python",
-  "convert": "{root}/xc7/convert.py",
   "fasm2netlist": "{builds}/fasm2netlist/fasm2netlist",
   "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
   "sta": "{prefix}/bin/sta",
@@ -52,7 +50,7 @@
     {
       "id": "sta",
       "label": "OpenSTA",
-      "command": "python3 {sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"
     },
     {
       "id": "lvs",
@@ -62,7 +60,7 @@
     {
       "id": "bit",
       "label": "Bitstream",
-      "command": "{python} {convert} --arch xilinx --family xc7 --part {part} --db {prjxray_db} --fasm {fasm} --output {bit}"
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}"
     },
     {
       "id": "program",

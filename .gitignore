@@ -2,3 +2,5 @@ build/
 shots/
 build.cmake.log
 build-deps/
+build-release/
+__pycache__/

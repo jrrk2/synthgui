@@ -68,8 +68,8 @@ wrongly on the board.  deps/nextpnr (the `clock-tree-bram-place` branch) adds
 both fixes, on by default, as the Place & route panel's **Clock tree delay
 model** and **Block RAM placement by read-mux group**.
 
-The **Block RAM merit** step (`fom`, after Place & route) runs nextpnr's
-`.github/scripts/bram_fom.py` on the placement: each block RAM's worst
+The **Block RAM merit** step (`fom`, after Place & route) runs the built-in `bram-fom` tool
+(`tools/bram_fom/`, from nextpnr's `.github/scripts/bram_fom.py`) on the placement: each block RAM's worst
 estimated read path to the registers it feeds, from the placement alone.  The
 Timing tab shows its worst and 95th percentile against the project's
 `bram_fom_budget` ("worst/p95" in ps), and whether the two passes ran.  The
@@ -99,7 +99,7 @@ counted and left out.
 ## OpenSTA step
 
 Place & Route also writes the routed design (`--write`) and an SDF (`--sdf`).
-The OpenSTA step runs `sta/nextpnr_sta.py`, which turns those into a flat Verilog
+The OpenSTA step runs the built-in `sta-prep` tool (`tools/sta_prep/`, from `sta/nextpnr_sta.py`), which turns those into a flat Verilog
 netlist, a Liberty file and a Tcl script, then runs OpenSTA's `sta` on them.
 
 nextpnr's SDF uses its own physical cell types (SLICE_LUTX, SLICE_FFX,
@@ -139,8 +139,27 @@ The tools the flow calls are submodules under `deps/`:
 | submodule | provides |
 | --- | --- |
 | `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog |
-| `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; `xc7/convert.py` drives prjxray |
+| `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; prjxray's `xc7frames2bit` makes the bitstream from the frames the built-in `fasm2frames` writes |
 | `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
+
+### Built-in tools
+
+The converters between the big tools are part of synthgui, so the flow runs without Python: a step's command names
+one as `@name` (project variables `{fasm2frames}`, `{bit2uf2}`, `{sta_prep}`, `{bram_fom}`) and synthgui runs it in a worker
+thread, its output going to the step's log. Commands before and after it in a `&&` chain run through bash as before. The
+programs with their own maintainers (verilator, nextpnr, OpenSTA, prjxray's `xc7frames2bit`, fasm2netlist, openFPGALoader)
+stay separate executables, started as processes.
+
+| tool | what it does | the program it is checked against |
+| --- | --- | --- |
+| `fasm2frames` (`tools/fasm2frames/`) | FASM to frames, with prjxray's IO-bank and glue rules (a port of prjxray's `utils/fasm2frames.py`, ISC licence, notice kept) | `xc7/fasm2frames_fast.py` |
+| `bit2uf2` (`tools/bit2uf2/`) | wraps a bitstream in UF2 blocks for the Sonata board's SONATA drive | `xc7/bit2uf2.py` |
+| `sta-prep` (`tools/sta_prep/`) | nextpnr's routed JSON and SDF to a Liberty file, a Verilog netlist and the Tcl `sta` reads | `sta/nextpnr_sta.py` |
+| `bram-fom` (`tools/bram_fom/`) | the block RAM figure of merit | `deps/nextpnr/.github/scripts/bram_fom.py` |
+
+Each is also a command, `build/synthgui --tool NAME args`, for scripts and for the checks: `tools/*/compare.sh` runs the
+Python original and the tool on the same inputs and compares the outputs byte for byte (every FASM, netlist and placement
+in `~/synthgui-work` gave identical results, on Artix-7 and Virtex-7). The Python files stay in the tree as the reference.
 
 The Xilinx primitive models Verilator reads as cell stubs, and that the
 mapped Verilog simulates against, are `xc7/cells_sim.v` and
@@ -156,6 +175,17 @@ so that the flow needs no yosys at all.
 alike. On macOS install the prerequisites with Homebrew first:
 
     brew install qt cmake boost eigen autoconf automake bison flex help2man tcl-tk@8 swig \
-        libftdi libusb hidapi libffi pkgconf python
+        libftdi libusb hidapi libffi pkgconf
 
 and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --prefix qt)`.
+
+## macOS release
+
+`scripts/package-macos.sh` builds `build-release/synthgui.app` (Qt bundled by `macdeployqt`), puts the tools the flow runs
+into `Contents/Resources` with their libraries relocated (`scripts/bundle-tools.py`: verilator, nextpnr and its chip
+databases, fasm2netlist, `xc7frames2bit`, OpenSTA with Tcl's script library, openFPGALoader, and the artix7 and virtex7
+parts of prjxray-db; `FAMILIES="artix7 virtex7 kintex7"` changes that), signs every Mach-O with your Developer ID
+Application identity and the hardened runtime, and writes `synthgui-VERSION-macos-arm64.zip`. There is no Python in it.
+With `NOTARY_PROFILE=name` (made once with `xcrun notarytool store-credentials name`) it notarizes and staples as well.
+The bundle runs from any location, with nothing from Homebrew: perl (`/usr/bin/perl`, for verilator) and the macOS system
+libraries are the only things it uses from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.
