@@ -191,7 +191,8 @@ Each project is also checked for what a step's exit status does not say: nextpnr
 frames are the ones recorded for the platform in `ci/expected/<platform>.txt` (`Darwin-arm64.txt`, `Linux-x86_64.txt`). The
 same inputs give the same FASM and frames on a machine, so a changed hash means a changed flow (a tool, a project, a
 submodule); if that is intended, `CI_BASELINE=update scripts/ci-flow.sh PROJECT...` records the new hashes, to be committed.
-A platform with no file is not checked for the hashes. The jobs upload `hashes.txt` (same format) with the logs, to refresh
+A platform with no file is not checked for the hashes. A step known to fail can be left out of one project in `ci/skip-steps.txt` (project, step, reason); the step table lists it as
+skipped, with the reason, so it is never silent (today: `vc707_bramtest`'s LVS). The jobs upload `hashes.txt` (same format) with the logs, to refresh
 a platform from its runner. `scripts/ci-flow.sh` runs in `ci-work/`, not the project's own work directory, so it is safe to
 run on a development machine. The quick set also runs on macOS arm64, the release platform, in one job that does not fail
 the run yet: it has not been through a GitHub runner.

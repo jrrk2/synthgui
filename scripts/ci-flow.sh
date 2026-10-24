@@ -7,6 +7,8 @@
 #   WORKDIR=dir                             where the projects run (default ci-work/): never the project's own work directory
 #   CI_BASELINE=check|update|off            see below (default check)
 #
+# ci/skip-steps.txt lists steps to leave out of a project (PROJECT STEP reason): each shows in the table as skipped, with its reason.
+#
 # The step table goes to stdout and, under GitHub Actions, to the job summary. Exits 1 if any step of any project failed.
 #
 # Besides the steps, two things are checked, because a step exiting 0 does not say the result is still the right one:
@@ -46,12 +48,16 @@ timing_check() {
     echo "$final" | sed "s/.*clock *'\\([^']*\\)': \\([0-9.]*\\) MHz (PASS at \\([0-9.]*\\) MHz)/\\1 \\2 MHz (target \\3)/" | tr '\n' ';'
 }
 
+skipped_steps() { [ -f ci/skip-steps.txt ] && awk -v p="$1" '!/^#/ && $1==p {print $2}' ci/skip-steps.txt; }
+skip_reason() { awk -v p="$1" -v s="$2" '!/^#/ && $1==p && $2==s {$1=$2=""; sub(/^ +/, ""); print}' ci/skip-steps.txt; }
+
 recorded() { [ -f "$expected" ] && awk -v p="$1" -v a="$2" '$1==p && $2==a {print $3}' "$expected"; }
 
 printf '| project | step | result | seconds |\n| --- | --- | --- | --- |\n' | tee -a "$summary"
 for name in "$@"; do
     p=projects/$name.json
-    ids=$(jq -r '[.steps[].id | select(startswith("program") | not)] | join(",")' "$p")
+    skip=$(skipped_steps "$name" | jq -R . | jq -sc .)
+    ids=$(jq -r --argjson skip "$skip" '[.steps[].id | select(startswith("program") | not) | select(. as $i | ($skip | index($i)) == null)] | join(",")' "$p")
     top=$(jq -r .top "$p")
     work=$base/$name
     rm -rf "$work"                         # every run from scratch, in a directory of this script's own
@@ -69,6 +75,9 @@ for name in "$@"; do
             res="not run"; secs=; ok=0
         fi
         printf '| %s | %s | %s | %s |\n' "$name" "$id" "$res" "$secs" | tee -a "$summary"
+    done
+    for id in $(skipped_steps "$name"); do
+        printf '| %s | %s | skipped: %s | |\n' "$name" "$id" "$(skip_reason "$name" "$id")" | tee -a "$summary"
     done
     # a failure that left no .status (synthgui itself failed) still fails the run
     [ $rc = 0 ] || [ ${#failed[@]} -gt 0 ] || failed+=("$name (synthgui exit $rc after $(( $(date +%s) - t0 )) s)")
