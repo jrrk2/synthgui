@@ -66,8 +66,16 @@ rm -rf "$OUT/$BD/prefix/lib/tcl8.6/tzdata"
 # ---- the database the tools read; the example projects without the Sonata Linux tree
 for fam in $FAMILIES; do
     mkdir -p "$OUT/deps/prjxray-db"
-    cp -R deps/prjxray-db/$fam "$OUT/deps/prjxray-db/"
+    cp -RL deps/prjxray-db/$fam "$OUT/deps/prjxray-db/"
     rm -rf "$OUT/deps/prjxray-db/$fam/harness"
+done
+# prjxray-db has symlinks (virtex7/tileconn.json -> xc7vx485t/tileconn.json). A checkout with core.symlinks off has
+# them as text files holding the target; either way the package gets a copy of the target itself
+git -C deps/prjxray-db ls-files -s | awk '$1 == "120000" {print $4}' | while read -r link; do
+    case " $FAMILIES " in *" ${link%%/*} "*) ;; *) continue ;; esac
+    target=$(dirname "$link")/$(git -C deps/prjxray-db cat-file -p "HEAD:$link")
+    rm -rf "$OUT/deps/prjxray-db/$link"
+    cp -RL "deps/prjxray-db/$target" "$OUT/deps/prjxray-db/$link"
 done
 cp -R xc7 "$OUT/"
 rm -rf "$OUT"/xc7/__pycache__ "$OUT"/xc7/*.py   # the reference the built-in tools (tools/) were checked against
