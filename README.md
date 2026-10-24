@@ -223,6 +223,13 @@ out of the box all of them have FTDI's serial driver. Once per board, run [Zadig
 and replace its driver with WinUSB. Leave the other interfaces alone: they are the board's serial ports. The package
 carries these steps for its users in `README-Windows.txt` (`scripts/README-Windows.txt`).
 
+`.github/workflows/windows-release.yml` makes the same package on GitHub's Windows runners, from source with nothing
+cached: run it from the Actions tab for a test build (the zip is the run's artifact), or push a `v*-windows` tag for a
+draft release to check and publish. It is set up for signing by [SignPath Foundation](https://signpath.org), which
+signs only builds made this way: once the project is accepted, the secret `SIGNPATH_API_TOKEN` and the variables
+`SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` turn it on, with
+`.signpath/artifact-configuration.xml` as the project's artifact configuration (it signs `synthgui.exe`).
+
 The GUI alone also builds with the Qt installer's kits (MSVC 2022 or MinGW) and no submodules:
 `cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.x.x/msvc2022_64 && cmake --build build --config Release`, then
 `windeployqt --release build/Release/synthgui.exe`.

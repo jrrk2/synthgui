@@ -132,6 +132,7 @@ usblibs() {
     [ -d "$src/hidapi" ] || git clone -q --depth 1 -b hidapi-0.14.0 https://github.com/libusb/hidapi.git "$src/hidapi"
     if [ ! -d "$src/libftdi1-1.5" ]; then
         curl -sSLf -o "$src/libftdi1-1.5.tar.bz2" https://www.intra2net.com/en/developer/libftdi/download/libftdi1-1.5.tar.bz2
+        echo "7c7091e9c86196148bd41177b4590dccb1510bfe6cea5bf7407ff194482eb049  $src/libftdi1-1.5.tar.bz2" | sha256sum -c -
         tar -C "$src" -xjf "$src/libftdi1-1.5.tar.bz2"
     fi
     (cd "$src/libusb" && { [ -f configure ] || ./bootstrap.sh; } &&
