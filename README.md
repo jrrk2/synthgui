@@ -186,7 +186,7 @@ build, not to run: its shell, make, autoconf, bison, flex and perl configure and
 Install [MSYS2](https://www.msys2.org), then in a MINGW64 shell:
 
     pacman -S --needed make autoconf automake libtool bison flex help2man git patch gperf \
-        mingw-w64-x86_64-{gcc,cmake,ninja,pkgconf,boost,eigen3,tcl,swig,zlib,python,readline,dlfcn,z3,qt6-base,qt6-tools}
+        zip mingw-w64-x86_64-{gcc,cmake,ninja,pkgconf,boost,eigen3,tcl,swig,zlib,python,readline,dlfcn,z3,qt6-base,qt6-tools}
     git config --global core.autocrlf false     # before cloning: CRLF breaks the autotools and generator scripts
     git clone --recurse-submodules https://github.com/jrrk2/synthgui.git && cd synthgui
     JOBS=3 scripts/build-deps.sh                # JOBS: each compile can take 1 GB; the default is every CPU

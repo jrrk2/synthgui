@@ -76,6 +76,8 @@ tar -C projects --exclude linux --exclude '*.log' -cf - . | tar -C "$OUT/project
 cp example.json "$OUT/"
 # how to run it, and the one-off WinUSB driver step openFPGALoader needs
 cp scripts/README-Windows.txt "$OUT/"
+# no debug information in the shipped programs (nextpnr is 180 MB with it, 20 without)
+find "$OUT" -name '*.exe' -exec strip --strip-debug {} +
 
 # ---- every directory with programs gets the MINGW64 DLLs they (and, under bin/, the Qt plugins) load
 dlls() {  # the non-system DLLs FILE... load, as MSYS paths
@@ -105,4 +107,11 @@ for exe in "$OUT/bin/synthgui.exe" "$OUT/$BD/prefix/bin/"*.exe "$OUT/$BD/nextpnr
     fi
 done
 echo "$OUT: $(du -sm "$OUT" | cut -f1) MB"
-exit $bad
+[ $bad = 0 ] || exit 1
+
+# ---- the zip a release carries (pacman -S zip), and its SHA-256 for the release notes
+ZIP=$OUT.zip
+rm -f "$ZIP"
+(cd "$B" && zip -qr -9 "$(basename "$ZIP")" "$(basename "$OUT")")
+echo "$ZIP: $(du -sm "$ZIP" | cut -f1) MB"
+echo "SHA-256: $(sha256sum "$ZIP" | cut -d' ' -f1)"
