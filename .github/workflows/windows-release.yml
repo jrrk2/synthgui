@@ -43,7 +43,10 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: ${{ env.MSYS2_PACKAGES }}
+      - name: Install MSYS2 packages
+        shell: msys2 {0}
+        run: |   # a mirror that stalls fails the whole transaction: try again
+          for i in 1 2 3; do pacman -S --needed --noconfirm $MSYS2_PACKAGES && exit 0; sleep 30; done; exit 1
       - shell: msys2 {0}
         run: scripts/build-deps.sh cudd prjxray fasm2netlist sta ofl
       - uses: actions/upload-artifact@v4
@@ -70,7 +73,10 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: ${{ env.MSYS2_PACKAGES }}
+      - name: Install MSYS2 packages
+        shell: msys2 {0}
+        run: |   # a mirror that stalls fails the whole transaction: try again
+          for i in 1 2 3; do pacman -S --needed --noconfirm $MSYS2_PACKAGES && exit 0; sleep 30; done; exit 1
       - shell: msys2 {0}
         run: scripts/build-deps.sh verilator
       - uses: actions/upload-artifact@v4
@@ -93,7 +99,10 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: ${{ env.MSYS2_PACKAGES }}
+      - name: Install MSYS2 packages
+        shell: msys2 {0}
+        run: |   # a mirror that stalls fails the whole transaction: try again
+          for i in 1 2 3; do pacman -S --needed --noconfirm $MSYS2_PACKAGES && exit 0; sleep 30; done; exit 1
       - shell: msys2 {0}
         run: scripts/build-deps.sh nextpnr
       - uses: actions/upload-artifact@v4
@@ -120,7 +129,10 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: ${{ env.MSYS2_PACKAGES }}
+      - name: Install MSYS2 packages
+        shell: msys2 {0}
+        run: |   # a mirror that stalls fails the whole transaction: try again
+          for i in 1 2 3; do pacman -S --needed --noconfirm $MSYS2_PACKAGES && exit 0; sleep 30; done; exit 1
       # each artifact unpacks below the directory its files have in common
       - uses: actions/download-artifact@v4
         with: { name: tools, path: build-deps }
