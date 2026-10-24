@@ -136,17 +136,29 @@ build/tccroot/usr/bin/tcc: $(TCC)/tcc tools/stage_tcc.py
 images/sonata-logo.rgb565: tools/gen_logo.py ../../sonata-lib/font8x8_basic.h
 	python3 tools/gen_logo.py $@ ../rtl
 
+# The built-in pictures for /usr/bin/photobox come from the photobox repository (https://github.com/jrrk2/photobox, the
+# author's own astrophotographs): clone it next to synthgui or point PHOTOBOX at it. Its frames/NAME.raw.gz are
+# unpacked here (raw RGB565, 40960 bytes each) because the rootfs is read straight from flash; frames.txt gives the order.
+PHOTOBOX ?= $(CURDIR)/../../../../photobox
+build/photobox.stamp: $(PHOTOBOX)/frames.txt $(wildcard $(PHOTOBOX)/frames/*.raw.gz)
+	@test -f $(PHOTOBOX)/frames.txt || { echo "need the photobox repository: git clone https://github.com/jrrk2/photobox $(PHOTOBOX)"; exit 1; }
+	rm -rf build/photobox && mkdir -p build/photobox && cp $(PHOTOBOX)/frames.txt build/photobox/
+	for n in $$(cat $(PHOTOBOX)/frames.txt); do gzip -dc $(PHOTOBOX)/frames/$$n.raw.gz > build/photobox/$$n.raw; done
+	touch $@
+
 # The root filesystem is defined here and in userland/skeleton: directories, device nodes, /etc, BusyBox + musl,
 # tcc and the examples. /sbin/init is BusyBox's init: userland/skeleton/etc/inittab and init.d/rcS (mounts /proc, /sys
 # and a tmpfs /tmp) and a login shell on the serial console with a controlling terminal, so Ctrl-C works.
 images/rootfs.romfs: tools/romfs_add.py $(BB)/busybox images/sonata-logo.rgb565 userland/showlogo userland/fbget userland/cc \
+	  userland/photobox build/photobox.stamp \
 	  build/tccroot/usr/bin/tcc $(wildcard userland/src/*) $(wildcard userland/skeleton/etc/*)
 	python3 -I tools/romfs_add.py - $@ --busybox $(BB)/busybox --links $(BB)/busybox.links \
 	  --dir /tmp --dir /proc --dir /sys --dir /dev --dir /root --dir /mnt --dir /usr/sbin --dir /var \
 	  --dev /dev/console=c:5:1 --dev /dev/null=c:1:3 --dev /dev/zero=c:1:5 --dev /dev/tty=c:5:0 --dev /dev/fb0=c:29:0 \
 	  --udhcpc-script $(BB)/examples/udhcp/simple.script \
 	  --file /usr/share/sonata-logo.rgb565=images/sonata-logo.rgb565 --file /usr/bin/showlogo=userland/showlogo:x \
-	  --file /usr/bin/fbget=userland/fbget:x --file /usr/bin/cc=userland/cc:x --tree build/tccroot=/ --tree userland/src=/usr/src \
+	  --file /usr/bin/fbget=userland/fbget:x --file /usr/bin/cc=userland/cc:x \
+	  --file /usr/bin/photobox=userland/photobox:x --tree build/photobox=/usr/share/photobox --tree build/tccroot=/ --tree userland/src=/usr/src \
 	  --tree userland/skeleton=/ --symlink /etc/resolv.conf=/proc/net/pnp
 
 # The BIOS command tftpflash streams a TFTP file into the flash (it erases, writes and verifies one 64 KB block at a

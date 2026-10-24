@@ -62,7 +62,7 @@ binary. `tools/romfs_add.py` starts from an empty romfs and adds:
   `tools/stage_tcc.py` lays out the on-board tree (`/usr/bin/tcc`, `/usr/lib/tcc/{libtcc1.a,include}`, musl's headers,
   the kernel headers a program needs, `crt*.o`, stripped `libc.a` and `libgcc.a`). The `cc` command is `tcc -static`.
 * **Files from this repository**: `userland/skeleton/` (`/etc/inittab`, `profile`, `passwd`, `group`, `hosts`),
-  `userland/src/` (`/usr/src`: `gfx.h`, the demos and `build.sh`), `userland/{showlogo,fbget,cc}`, the logo (`tools/gen_logo.py`), the
+  `userland/src/` (`/usr/src`: `gfx.h`, the demos and `build.sh`), `userland/{showlogo,fbget,cc,photobox}`, the photographs for `/usr/share/photobox` (from https://github.com/jrrk2/photobox, the author's own work: `frames/*.raw.gz` unpacked by `make`), the logo (`tools/gen_logo.py`), the
   `/sbin/init` script (written by `tools/romfs_add.py`), the directories and device nodes listed in `linux/Makefile`,
   BusyBox's own `examples/udhcp/simple.script` for `udhcpc`, and `/etc/resolv.conf` as a link to `/proc/net/pnp`.
 

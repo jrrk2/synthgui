@@ -1,0 +1,42 @@
+#!/bin/sh
+# photobox [SECONDS [URL]] -- slideshow on the Sonata LCD. Ctrl-C stops.
+#   photobox            the pictures built into the root filesystem, 8 s each
+#   photobox 5          5 s each
+#   photobox 8 https://jrrk2.github.io/photobox
+#                       the same, and fetch any further pictures listed in URL/frames.txt (frames/NAME.raw.gz) in
+#                       the background; each joins the show as soon as it has arrived
+# The built-in pictures are /usr/share/photobox/NAME.raw, in the order of /usr/share/photobox/frames.txt. Downloaded
+# ones are kept in /tmp/photobox (RAM, gone at reboot; 40 KB each). /dev/fb0 stays open for the whole run, so the
+# text console never shows between pictures. A download over https costs the board 20-45 s of CPU per file.
+secs=${1:-8}
+url=$2
+dir=/usr/share/photobox
+cache=/tmp/photobox
+mkdir -p $cache
+exec 3>/dev/fb0
+trap 'kill $fetcher 2>/dev/null; exec 3>&-; exit' INT TERM EXIT
+fetcher=
+if [ -n "$url" ]; then
+    (
+        wget -q -O $cache/frames.txt "$url/frames.txt" || { echo "photobox: no $url/frames.txt" >&2; exit 1; }
+        for n in $(cat $cache/frames.txt); do
+            [ -f "$dir/$n.raw" ] || [ -f "$cache/$n.raw" ] && continue
+            wget -q -O $cache/$n.gz "$url/frames/$n.raw.gz" && zcat $cache/$n.gz > $cache/$n.tmp
+            rm -f $cache/$n.gz
+            if [ "$(wc -c < $cache/$n.tmp 2>/dev/null)" -eq 40960 ] 2>/dev/null; then
+                mv $cache/$n.tmp $cache/$n.raw
+            else
+                rm -f $cache/$n.tmp
+                echo "photobox: bad frame $n" >&2
+            fi
+        done
+    ) &
+    fetcher=$!
+fi
+while :; do
+    for f in $(sed "s#.*#$dir/&.raw#" $dir/frames.txt) $cache/*.raw; do
+        [ -f "$f" ] || continue
+        cat "$f" > /dev/fb0
+        sleep "$secs"
+    done
+done

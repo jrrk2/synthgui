@@ -98,6 +98,12 @@ soft core, so keep programs small.
   without one it waits for input from the terminal. Try `fbview /usr/share/sonata-logo.rgb565 10`, or
   `wget -q -O - http://192.168.1.169:8000/frame.raw.gz | zcat | fbview - 10`. Opening
   `/dev/fb0` hides the text console while the program runs.
+* `photobox` is a slideshow of 15 astrophotographs built into the root filesystem (`/usr/share/photobox/*.raw`, 40960 bytes
+  each, read straight from flash: no network, no decompression). `photobox 5` changes the interval from 8 s; Ctrl-C stops.
+  `photobox 8 https://jrrk2.github.io/photobox` also fetches further pictures listed in that site's `frames.txt` in the
+  background, each joining the show once it has arrived (https costs the board 20-45 s of CPU per file, and the downloads
+  sit in `/tmp`, which is RAM). The pictures come from https://github.com/jrrk2/photobox (clone it next to synthgui, or
+  set `PHOTOBOX=` for `make`).
 * Ready-made pictures: `tools/img2fb.py picture.png frame.raw [--gz] [--stretch]` (Pillow for PNG/JPEG, plain PPM
   without it) makes a raw 160x128 RGB565 frame; serve it from the PC (`python3 -m http.server 8000`) and on the board run
   `fbget http://pc:8000/frame.raw 10`. `fbget` also takes `.raw.gz`, checks the size, and shows the frame for N seconds.
