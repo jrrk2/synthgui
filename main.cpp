@@ -105,7 +105,13 @@ struct Project {
     static QString repoRoot() {
         const QString app = QCoreApplication::applicationDirPath();
         if (app.endsWith("/Contents/MacOS")) return QDir(app + "/../Resources").absolutePath();
-        return QDir(app + "/..").absolutePath();
+        QDir d(app);
+#ifdef Q_OS_WIN
+        // multi-config generators (Visual Studio) put the exe in build/Release
+        static const QStringList configs{"Release", "Debug", "RelWithDebInfo", "MinSizeRel"};
+        if (configs.contains(d.dirName(), Qt::CaseInsensitive)) d.cdUp();
+#endif
+        return QDir(d.absolutePath() + "/..").absolutePath();
     }
     // Inside synthgui.app the tools sit in Contents/Resources/build-deps (scripts/bundle-tools.py): steps run with
     // them first on PATH.
@@ -855,10 +861,11 @@ namespace {
 struct Piece {
     bool builtin;
     QString text;
+    bool direct = false;  // run by this program without a shell (directPieces)
 };
 
-// split at && outside quotes and parentheses; consecutive ordinary commands stay together so `cd x && prog` still works
-QList<Piece> splitPieces(const QString& cmd) {
+// the command's parts between && outside quotes and parentheses
+QStringList andSegments(const QString& cmd) {
     QStringList segs;
     QString cur;
     QChar q;
@@ -883,7 +890,14 @@ QList<Piece> splitPieces(const QString& cmd) {
         cur += c;
     }
     segs << cur;
-    auto isBuiltin = [](const QString& s) { return s.size() > 1 && s[0] == '@' && s[1].isLetter(); };
+    return segs;
+}
+
+bool isBuiltin(const QString& s) { return s.size() > 1 && s[0] == '@' && s[1].isLetter(); }
+
+// consecutive ordinary commands stay together so `cd x && prog` still works
+QList<Piece> splitPieces(const QString& cmd) {
+    const QStringList segs = andSegments(cmd);
     bool any = false;
     for (const QString& s : segs) any |= isBuiltin(s.trimmed());
     if (!any) return {{false, cmd}};
@@ -919,6 +933,37 @@ QStringList shellWords(const QString& s) {
         else { cur += c; have = true; }
     }
     if (have || !cur.isEmpty()) out << cur;
+    return out;
+}
+
+// words, quotes and VAR=value only: nothing a shell would expand, redirect or pipe
+bool plainSegment(const QString& s) {
+    QChar q;
+    for (int i = 0; i < s.size(); i++) {
+        const QChar c = s[i];
+        if (q == '\'') { if (c == '\'') q = QChar(); continue; }
+        if (c == '\\' && i + 1 < s.size()) { i++; continue; }
+        if (q == '"') {
+            if (c == '"') q = QChar();
+            else if (c == '$' || c == '`') return false;
+            continue;
+        }
+        if (c == '\'' || c == '"') { q = c; continue; }
+        if (QString("|;<>&`$()*?[]~#!").contains(c)) return false;
+    }
+    return q.isNull();
+}
+
+// The step as pieces this program runs itself, one per && part (MainWindow::runDirect), or nothing when some part needs a
+// shell.  The project commands use no more than this, so on Windows the flow needs no bash.
+QList<Piece> directPieces(const QString& cmd) {
+    QList<Piece> out;
+    for (const QString& s : andSegments(cmd)) {
+        const QString t = s.trimmed();
+        if (isBuiltin(t)) out.append({true, t});
+        else if (!t.isEmpty() && plainSegment(t)) out.append({false, t, true});
+        else return {};
+    }
     return out;
 }
 
@@ -1287,6 +1332,11 @@ private:
         setStepState(s.id, " " + s.label + ": running ", "#b07000");
         m_t0 = QDateTime::currentMSecsSinceEpoch();
         m_pieces = splitPieces(cmd);
+#ifdef Q_OS_WIN
+        // without a shell when the command allows it: then the flow needs no bash (and no MSYS) at all
+        m_cwd = m_p.work;
+        if (const QList<Piece> d = directPieces(cmd); !d.isEmpty()) m_pieces = d;
+#endif
         runPiece();
     }
     void appendLog(const QByteArray& b) {
@@ -1300,6 +1350,7 @@ private:
         if (m_pieces.isEmpty()) { finishStep(0); return; }
         const Piece p = m_pieces.takeFirst();
         if (p.builtin) runBuiltin(p.text);
+        else if (p.direct) runDirect(p.text);
         else runShell(p.text);
     }
     void pieceDone(int code) {
@@ -1316,8 +1367,100 @@ private:
             m_proc = nullptr;
             pieceDone(code);
         });
-        if (Project::bundled()) m_proc->setProcessEnvironment(Project::bundledEnvironment());
-        m_proc->start("/bin/bash", {"-c", cmd});
+        m_proc->setProcessEnvironment(toolEnvironment());
+        m_proc->start(bashPath(), {"-c", cmd});
+    }
+    static QProcessEnvironment toolEnvironment() {
+        QProcessEnvironment env = Project::bundled() ? Project::bundledEnvironment() : QProcessEnvironment::systemEnvironment();
+#ifdef Q_OS_WIN
+        // The tools are MINGW64 programs (scripts/build-deps.sh).  scripts/package-windows.sh puts their DLLs beside them;
+        // run from the checkout they come from MSYS2 (MSYS2_ROOT if not C:/msys64).
+        const QString mingw = QDir::toNativeSeparators(env.value("MSYS2_ROOT", "C:/msys64") + "/mingw64/bin");
+        if (QFileInfo::exists(mingw)) env.insert("PATH", mingw + ";" + env.value("PATH"));
+#endif
+        return env;
+    }
+    // one && part of a step (directPieces): VAR=value prefixes, then cd, mkdir [-p], cp or sync done here, or a program
+    // started without a shell, in the directory the step has cd'd to
+    void runDirect(const QString& text) {
+        QStringList w = shellWords(text);
+        QProcessEnvironment env = toolEnvironment();
+        static const QRegularExpression assign("^[A-Za-z_][A-Za-z0-9_]*=");
+        while (!w.isEmpty() && assign.match(w[0]).hasMatch()) {
+            const int eq = w[0].indexOf('=');
+            env.insert(w[0].left(eq), w[0].mid(eq + 1));
+            w.removeFirst();
+        }
+        auto path = [this](const QString& p) { return QDir(m_cwd).absoluteFilePath(p); };
+        auto fail = [this](const QString& msg) { appendLog((msg + "\n").toLocal8Bit()); pieceDone(1); };
+        if (w.isEmpty()) { pieceDone(0); return; }
+        const QString prog = w.takeFirst();
+        if (prog == "cd") {
+            const QString d = path(w.value(0, QDir::homePath()));
+            if (!QFileInfo(d).isDir()) return fail("cd: " + d + ": no such directory");
+            m_cwd = d;
+            pieceDone(0);
+            return;
+        }
+        if (prog == "mkdir") {
+            for (const QString& a : w)
+                if (a != "-p" && !QDir().mkpath(path(a))) return fail("mkdir: cannot create " + path(a));
+            pieceDone(0);
+            return;
+        }
+        if (prog == "cp") {
+            if (w.size() < 2) return fail("cp: missing operand");
+            const QString dst = path(w.takeLast());
+            for (const QString& s : w) {
+                const QString to = QFileInfo(dst).isDir() ? QDir(dst).filePath(QFileInfo(s).fileName()) : dst;
+                QFile::remove(to);
+                if (!QFile::copy(path(s), to)) return fail("cp: cannot copy " + path(s) + " to " + to);
+            }
+            pieceDone(0);
+            return;
+        }
+        if (prog == "sync" || prog == "true") { pieceDone(0); return; }
+        // a path as the step wrote it (CreateProcess adds .exe), or a name looked up on the tools' PATH
+        QString exe = prog.contains('/') || prog.contains('\\') ? path(prog)
+                    : QStandardPaths::findExecutable(prog, env.value("PATH").split(QDir::listSeparator(), Qt::SkipEmptyParts));
+        if (exe.isEmpty()) return fail(prog + ": command not found");
+        m_proc = new QProcess(this);
+        m_proc->setProcessChannelMode(QProcess::MergedChannels);
+        m_proc->setWorkingDirectory(m_cwd);
+        m_proc->setProcessEnvironment(env);
+        connect(m_proc, &QProcess::readyRead, this, [this] { appendLog(m_proc->readAll()); });
+        connect(m_proc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus) {
+            m_proc->deleteLater();
+            m_proc = nullptr;
+            pieceDone(code);
+        });
+        connect(m_proc, &QProcess::errorOccurred, this, [this, exe](QProcess::ProcessError e) {
+            if (e != QProcess::FailedToStart) return;  // anything else ends in finished()
+            m_proc->deleteLater();
+            m_proc = nullptr;
+            appendLog((exe + ": cannot run\n").toLocal8Bit());
+            pieceDone(127);
+        });
+        m_proc->start(exe, w);
+    }
+    static QString bashPath() {
+#ifdef Q_OS_WIN
+        // bash from Git for Windows or MSYS2; System32\bash.exe is the WSL launcher, which sees other paths
+        for (const QString& dir : qEnvironmentVariable("PATH").split(';', Qt::SkipEmptyParts)) {
+            const QString exe = QDir(dir).filePath("bash.exe");
+            if (QFileInfo(exe).isExecutable() && !QDir::cleanPath(dir).endsWith("/System32", Qt::CaseInsensitive))
+                return exe;
+        }
+        // Git for Windows puts only git.exe on the PATH (Git\cmd); bash is in Git\bin
+        const QString git = QStandardPaths::findExecutable("git");
+        if (!git.isEmpty()) {
+            const QString exe = QFileInfo(git).dir().filePath("../bin/bash.exe");
+            if (QFileInfo::exists(exe)) return QDir::cleanPath(exe);
+        }
+        return "bash";
+#else
+        return "/bin/bash";
+#endif
     }
     // a worker thread runs the tool; what it prints is posted to this thread, in order, ahead of its result
     void runBuiltin(const QString& text) {
@@ -1711,6 +1854,7 @@ private:
     QProcess* m_proc = nullptr;
     QThread* m_toolThread = nullptr;
     QList<Piece> m_pieces;
+    QString m_cwd;  // where a step's `cd` has gone (runDirect)
     QFile m_logFile;
     qint64 m_t0 = 0;
     std::function<void(bool)> m_done;

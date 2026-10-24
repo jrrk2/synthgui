@@ -179,6 +179,36 @@ alike. On macOS install the prerequisites with Homebrew first:
 
 and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --prefix qt)`.
 
+### Windows
+
+Everything, the GUI and the tools, builds as native programs with MSYS2's MINGW64 toolchain. MSYS2 is needed to
+build, not to run: its shell, make, autoconf, bison, flex and perl configure and generate, and MINGW64 gcc compiles.
+Install [MSYS2](https://www.msys2.org), then in a MINGW64 shell:
+
+    pacman -S --needed make autoconf automake libtool bison flex help2man git patch gperf \
+        mingw-w64-x86_64-{gcc,cmake,ninja,pkgconf,boost,eigen3,tcl,swig,zlib,python,readline,dlfcn,z3,qt6-base,qt6-tools}
+    git config --global core.autocrlf false     # before cloning: CRLF breaks the autotools and generator scripts
+    git clone --recurse-submodules https://github.com/jrrk2/synthgui.git && cd synthgui
+    JOBS=3 scripts/build-deps.sh                # JOBS: each compile can take 1 GB; the default is every CPU
+    cmake -S . -B build -G Ninja && cmake --build build
+    scripts/package-windows.sh                  # build-release/synthgui-VERSION-windows-x64/
+
+On Windows `build-deps.sh` also builds libusb, hidapi and libftdi for openFPGALoader (MSYS2 no longer packages them
+for MINGW64) and skips the Python venv, which nothing in the flow uses. Run from the checkout, `build/synthgui.exe`
+finds the tools' DLLs in `C:\msys64\mingw64\bin` (`MSYS2_ROOT` if MSYS2 is elsewhere).
+`scripts/package-windows.sh` makes a folder that needs none of it: Qt, the tools, their DLLs, Tcl's library and the
+prjxray-db families (`FAMILIES`) are all inside, and `bin/synthgui.exe` runs from any location.
+
+synthgui runs a step's command itself on Windows: each `&&` part is a `VAR=value` prefix and a program started
+directly, or `cd`, `mkdir -p`, `cp` or `sync` done in-process. Only a command with more shell than that (pipes,
+redirection, `$`) is passed to bash, which then has to be installed (Git for Windows or MSYS2). The project files'
+steps need no shell. The Sonata *Program* step copies to `/Volumes/SONATA`, the macOS mount point of the board's drive;
+on Windows change it to the drive letter.
+
+The GUI alone also builds with the Qt installer's kits (MSVC 2022 or MinGW) and no submodules:
+`cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.x.x/msvc2022_64 && cmake --build build --config Release`, then
+`windeployqt --release build/Release/synthgui.exe`.
+
 ## macOS release
 
 `scripts/package-macos.sh` builds `build-release/synthgui.app` (Qt bundled by `macdeployqt`), puts the tools the flow runs

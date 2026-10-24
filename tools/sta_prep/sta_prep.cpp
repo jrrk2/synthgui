@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
@@ -25,7 +26,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <sys/stat.h>
 #include "../common/minijson.hpp"
 #include "../common/toolio.hpp"
 
@@ -521,8 +521,8 @@ static void write_netlist(const string& path, const JV& mod, const Sdf& sdf) {
 }
 
 static void mkdir_p(const string& d) {
-    for (size_t i = 1; i <= d.size(); i++)
-        if (i == d.size() || d[i] == '/') mkdir(d.substr(0, i).c_str(), 0777);
+    std::error_code ec;  // as before, a directory that cannot be made shows up when its files cannot be written
+    std::filesystem::create_directories(d, ec);
 }
 
 static int tool_main(int argc, char** argv) {
