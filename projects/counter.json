@@ -20,9 +20,7 @@
         "SYNTHESIS"
     ],
     "device": "xc7vx485t",
-    "fasm2netlist": "{builds}/fasm2netlist/fasm2netlist",
-    "incdirs": [
-    ],
+    "incdirs": [],
     "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
     "name": "counter",
     "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
@@ -31,10 +29,10 @@
     "part": "xc7vx485tffg1761-2",
     "prjxray_db": "{deps}/prjxray-db",
     "sources": [
-        "~/synthgui/projects/counter/top.v",
-        "~/synthgui/projects/counter/telegraph_core.v"
+        "{root}/projects/counter/top.v",
+        "{root}/projects/counter/telegraph_core.v"
     ],
-    "srcdir": "~/synthgui/projects/counter",
+    "srcdir": "{root}/projects/counter",
     "sta": "{prefix}/bin/sta",
     "steps": [
         {
@@ -53,7 +51,7 @@
             "label": "OpenSTA"
         },
         {
-            "command": "{fasm2netlist} --fasm {fasm} --db {prjxray_db} --family virtex7 --device {device} --out {work}/{top}_gates.v --xdc {xdc} --part {part} && {yosys} -q -p 'read_json {json}; write_verilog -noattr {work}/{top}_mapped.v' && {lvs_equiv} --gold {work}/{top}_mapped.v --gate {work}/{top}_gates.v --top {top}",
+            "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {lvs_equiv} --gold {json} --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --db {prjxray_db}/{family} --device {device} --quiet",
             "id": "lvs",
             "label": "LVS"
         },
@@ -72,7 +70,8 @@
     "verilator": "{prefix}/bin/verilator_bin",
     "verilator_root": "{prefix}/share/verilator",
     "work": "~/synthgui-work/counter",
-    "xdc": "~/synthgui/projects/counter/top.xdc",
-    "xilinx_stubs": "{deps}/yosys/share/xilinx/cells_sim.v {deps}/yosys/share/xilinx/cells_xtra.v",
-    "yosys": "{deps}/yosys/yosys"
+    "xdc": "{root}/projects/counter/top.xdc",
+    "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+    "family": "virtex7",
+    "tileverilog": "{builds}/fasm2netlist/tileverilog"
 }

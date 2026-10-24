@@ -1,0 +1,169 @@
+# Build synthgui and run the example projects' flow (synthesis to bitstream, no programming) on every push that
+# changes the source: the GUI, the built-in tools, the project files, the cell models, the tool submodules.
+#
+# The tools (verilator, nextpnr with its chip databases, fasm2netlist, prjxray's xc7frames2bit, OpenSTA) are built by
+# scripts/build-deps.sh and cached under a key made of the submodule commits and build-deps.sh, so they are rebuilt only
+# when one of those changes (an hour or two); otherwise a run takes minutes. Each project is its own job
+# (scripts/ci-flow.sh), with its logs and bitstream kept as an artifact.
+#
+# The long designs (cdc6000, the ROM-Linux SoCs; an hour or more each) run weekly, or on demand: Actions, "flow", Run
+# workflow, projects "long", "all" or a list of names.
+name: flow
+
+on:
+  push:
+    paths: &source
+      - main.cpp
+      - options.h
+      - CMakeLists.txt
+      - tools/**
+      - projects/**
+      - xc7/**
+      - sta/**
+      - deps/**
+      - scripts/build-deps.sh
+      - scripts/ci-flow.sh
+      - .github/workflows/flow.yml
+  pull_request:
+    paths: *source
+  schedule:
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: 'quick (the per-push set), long, all, or project names separated by spaces'
+        default: quick
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flow-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # what scripts/build-deps.sh and the GUI build need on Ubuntu 24.04; the flow jobs install the same so the tools' and
+  # synthgui's shared libraries are there
+  APT_PACKAGES: >-
+    build-essential cmake ninja-build ccache autoconf automake libtool bison flex libfl-dev help2man perl python3
+    zlib1g-dev libboost-program-options-dev libboost-iostreams-dev libboost-thread-dev libboost-filesystem-dev
+    libboost-system-dev libeigen3-dev tcl-dev tcl-tclreadline libreadline-dev swig libgtest-dev libjemalloc-dev
+    qt6-base-dev libgl-dev jq
+  QUICK: >-
+    sonata_johnson sonata_telegraph sonata_lcd sonata_bramtest sonata_hyperram
+    johnson counter vc707_calc vc707_ethmin vc707_bramtest
+  LONG: cdc6000 vc707_cdc_eth vc707_romlinux sonata_romlinux
+
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      projects: ${{ steps.projects.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Projects to run
+        id: projects
+        env:
+          WANT: ${{ github.event_name == 'schedule' && 'all' || inputs.projects || 'quick' }}
+        run: |
+          case "$WANT" in
+            quick) set -- $QUICK ;;
+            long)  set -- $LONG ;;
+            all)   set -- $QUICK $LONG ;;
+            *)     set -- $WANT ;;
+          esac
+          for p; do [ -f "projects/$p.json" ] || { echo "::error::no projects/$p.json"; exit 1; }; done
+          echo "list=$(printf '%s\n' "$@" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache key (submodule commits, build-deps.sh)
+        id: key
+        run: echo "key=tools-v1-$(git ls-tree HEAD deps/ | sha256sum | cut -c1-16)-${{ hashFiles('scripts/build-deps.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the tools
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+          path: &tools |
+            build-deps/prefix
+            build-deps/nextpnr/nextpnr-himbaechel
+            build-deps/nextpnr/share
+            build-deps/fasm2netlist/tileverilog
+            build-deps/fasm2netlist/lvs_equiv
+            build-deps/prjxray/tools/xc7frames2bit
+
+      - name: Free disk space
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+
+      - name: Install packages
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends $APT_PACKAGES
+
+      - name: Build the tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1
+          # openFPGALoader only programs, which CI does not do; nothing in the flow uses the venv
+          scripts/build-deps.sh verilator prjxray nextpnr fasm2netlist sta
+          rm -f build-deps/prefix/bin/*_dbg
+          strip build-deps/prefix/bin/verilator_bin build-deps/prefix/bin/sta build-deps/nextpnr/nextpnr-himbaechel \
+              build-deps/fasm2netlist/tileverilog build-deps/fasm2netlist/lvs_equiv build-deps/prjxray/tools/xc7frames2bit
+          du -sh build-deps/prefix build-deps/nextpnr/share
+
+      - name: Save the tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: *tools
+
+  flow:
+    needs: tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.tools.outputs.projects) }}
+    name: flow (${{ matrix.project }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: prjxray-db
+        run: git submodule update --init --depth 1 deps/prjxray-db
+
+      - name: Install packages
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends $APT_PACKAGES
+
+      - name: Restore the tools
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ needs.tools.outputs.key }}
+          fail-on-cache-miss: true
+          path: |
+            build-deps/prefix
+            build-deps/nextpnr/nextpnr-himbaechel
+            build-deps/nextpnr/share
+            build-deps/fasm2netlist/tileverilog
+            build-deps/fasm2netlist/lvs_equiv
+            build-deps/prjxray/tools/xc7frames2bit
+
+      - name: Build synthgui
+        run: cmake -S . -B build -G Ninja && cmake --build build
+
+      - name: Run the flow
+        run: ARTIFACTS=ci-out scripts/ci-flow.sh ${{ matrix.project }}
+
+      - name: Keep the logs and bitstream
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-${{ matrix.project }}
+          path: ci-out
+          retention-days: 14
+          if-no-files-found: ignore

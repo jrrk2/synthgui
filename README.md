@@ -179,6 +179,14 @@ alike. On macOS install the prerequisites with Homebrew first:
 
 and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --prefix qt)`.
 
+### CI
+
+`.github/workflows/flow.yml` builds synthgui and runs the example projects' flow on Ubuntu 24.04 on every push that
+changes the source (GUI, `tools/`, `projects/`, `xc7/`, `sta/`, the submodule pointers, `build-deps.sh`): one job per
+project, every step but programming, its logs and bitstream kept as an artifact and a step table in the job summary.
+`scripts/ci-flow.sh PROJECT...` is that run, and works locally too. The tools are built once per set of submodule commits
+and cached. The long designs (cdc6000, the ROM-Linux SoCs) run weekly, or from *Run workflow* with projects `long`.
+
 ### Linux package
 
     scripts/package-linux.sh                    # build-release/synthgui-VERSION-linux-x86_64{/,.tar.gz}
