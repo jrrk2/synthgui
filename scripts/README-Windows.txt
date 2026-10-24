@@ -63,3 +63,7 @@ Notes
 - Work directories default to %USERPROFILE%\synthgui-work\<project>.
 - Not code-signed yet: Windows SmartScreen may warn the first time synthgui.exe is started ("More info", then
   "Run anyway").
+- Smart App Control (Windows 11, Settings > Privacy & security > Windows Security > App & browser control) judges
+  unsigned programs one by one and may block some of the tools ("Part of this app has been blocked"; a step then
+  fails with "cannot run"). It cannot be told to allow a single program: the choice is to wait for a signed release
+  or to turn Smart App Control off, which Windows only lets you turn back on by resetting or reinstalling Windows.

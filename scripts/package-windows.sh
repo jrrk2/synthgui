@@ -76,8 +76,10 @@ tar -C projects --exclude linux --exclude '*.log' -cf - . | tar -C "$OUT/project
 cp example.json "$OUT/"
 # how to run it, and the one-off WinUSB driver step openFPGALoader needs
 cp scripts/README-Windows.txt "$OUT/"
-# no debug information in the shipped programs (nextpnr is 180 MB with it, 20 without)
-find "$OUT" -name '*.exe' -exec strip --strip-debug {} +
+# no debug information in the shipped programs (nextpnr is 180 MB with it, 6 without). Not openFPGALoader: it has
+# little (0.5 MB), and Smart App Control blocked the stripped copy while it let the one built here run
+strip --strip-debug "$OUT"/bin/*.exe "$OUT/$BD"/{nextpnr,fasm2netlist,prjxray/tools}/*.exe \
+    "$OUT/$BD"/prefix/bin/{verilator_bin,sta}.exe
 
 # ---- every directory with programs gets the MINGW64 DLLs they (and, under bin/, the Qt plugins) load
 dlls() {  # the non-system DLLs FILE... load, as MSYS paths
@@ -100,9 +102,13 @@ done
 bad=0
 for exe in "$OUT/bin/synthgui.exe" "$OUT/$BD/prefix/bin/"*.exe "$OUT/$BD/nextpnr/"*.exe "$OUT/$BD/fasm2netlist/"*.exe \
            "$OUT/$BD/prjxray/tools/"*.exe; do
-    if PATH=/c/Windows/System32 /usr/bin/ldd "$exe" | grep -q "/mingw64/\|not found"; then
+    # ldd loads the program, so this also fails when Windows refuses it (Smart App Control)
+    if ! deps=$(PATH=/c/Windows/System32 /usr/bin/ldd "$exe" 2>&1); then
+        echo "cannot load $exe: $deps" >&2
+        bad=1
+    elif echo "$deps" | grep -q "/mingw64/\|not found"; then
         echo "still needs MSYS2: $exe" >&2
-        PATH=/c/Windows/System32 /usr/bin/ldd "$exe" | grep "/mingw64/\|not found" >&2
+        echo "$deps" | grep "/mingw64/\|not found" >&2
         bad=1
     fi
 done
