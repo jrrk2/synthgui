@@ -179,6 +179,16 @@ alike. On macOS install the prerequisites with Homebrew first:
 
 and configure the GUI with `cmake -S . -B build -DCMAKE_PREFIX_PATH=$(brew --prefix qt)`.
 
+### Linux package
+
+    scripts/package-linux.sh                    # build-release/synthgui-VERSION-linux-x86_64{/,.tar.gz}
+
+makes a folder for Ubuntu 24.04 with the tools, the chip databases and the prjxray-db families (`FAMILIES`) inside,
+and the Qt synthgui was built against in `lib/` and `plugins/` (`bin/qt.conf` keeps the system's Qt plugins out;
+Ubuntu 24.04's own Qt is 6.4). The other libraries are Ubuntu's, installed with apt as `README-Linux.txt`
+(`scripts/README-Linux.txt`) lists, along with the udev rule openFPGALoader needs. On other distributions build from
+source as above.
+
 ### Windows
 
 Everything, the GUI and the tools, builds as native programs with MSYS2's MINGW64 toolchain. MSYS2 is needed to
