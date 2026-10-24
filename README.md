@@ -194,8 +194,10 @@ Install [MSYS2](https://www.msys2.org), then in a MINGW64 shell:
     scripts/package-windows.sh                  # build-release/synthgui-VERSION-windows-x64/
 
 On Windows `build-deps.sh` also builds libusb, hidapi and libftdi for openFPGALoader (MSYS2 no longer packages them
-for MINGW64) and skips the Python venv, which nothing in the flow uses. Run from the checkout, `build/synthgui.exe`
-finds the tools' DLLs in `C:\msys64\mingw64\bin` (`MSYS2_ROOT` if MSYS2 is elsewhere).
+for MINGW64) and skips the Python venv, which nothing in the flow uses. Each build of the GUI copies Qt and the DLLs
+`build/synthgui.exe` loads beside it (`windeployqt` and `scripts/windows-deploy.cmake`; `-DSYNTHGUI_DEPLOY=OFF` skips
+that), so it also starts from File Explorer; the steps it runs find the tools' DLLs in `C:\msys64\mingw64\bin`
+(`MSYS2_ROOT` if MSYS2 is elsewhere).
 `scripts/package-windows.sh` makes a folder that needs none of it: Qt, the tools, their DLLs, Tcl's library and the
 prjxray-db families (`FAMILIES`) are all inside, and `bin/synthgui.exe` runs from any location.
 
@@ -204,6 +206,12 @@ directly, or `cd`, `mkdir -p`, `cp` or `sync` done in-process. Only a command wi
 redirection, `$`) is passed to bash, which then has to be installed (Git for Windows or MSYS2). The project files'
 steps need no shell. The Sonata *Program* step copies to `/Volumes/SONATA`, the macOS mount point of the board's drive;
 on Windows change it to the drive letter.
+
+openFPGALoader reaches a board's FTDI chip through libusb, which Windows only lets open an interface bound to WinUSB;
+out of the box all of them have FTDI's serial driver. Once per board, run [Zadig](https://zadig.akeo.ie), choose
+*Options → List All Devices*, pick the JTAG interface (on the Sonata *Sonata (Interface 0)*, USB ID `0403 6011 00`)
+and replace its driver with WinUSB. Leave the other interfaces alone: they are the board's serial ports. The package
+carries these steps for its users in `README-Windows.txt` (`scripts/README-Windows.txt`).
 
 The GUI alone also builds with the Qt installer's kits (MSVC 2022 or MinGW) and no submodules:
 `cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.x.x/msvc2022_64 && cmake --build build --config Release`, then

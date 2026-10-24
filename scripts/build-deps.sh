@@ -4,6 +4,9 @@
 #   scripts/build-deps.sh [tool ...]     tools: verilator nextpnr fasm2netlist prjxray cudd sta ofl venv
 #                                        (usblibs: libusb, hidapi, libftdi for ofl on Windows)
 #                                        (default: all of them)
+#   CHIPDBS=xc7a50t scripts/build-deps.sh nextpnr
+#                                        only these chip databases (default xc7a50t xc7vx485t); the 485t's takes
+#                                        several GB of memory to make, so where that is short make it on a run of its own
 #
 # Builds go under build-deps/ and install into build-deps/prefix where the
 # tool allows it.  verilator builds in its own tree regardless (its makefiles
@@ -62,7 +65,7 @@ nextpnr() {
     # ("defined in discarded section .gnu.linkonce")
     if [ "$mingw" ]; then libs=(-DUSE_IPO=OFF); fi
     cmake -S "$deps/nextpnr" -B "$out/nextpnr" -DARCH=himbaechel -DHIMBAECHEL_UARCH=xilinx \
-        -DBUILD_GUI=OFF -DBUILD_PYTHON=OFF -DHIMBAECHEL_XILINX_DEVICES="xc7a50t;xc7vx485t" \
+        -DBUILD_GUI=OFF -DBUILD_PYTHON=OFF -DHIMBAECHEL_XILINX_DEVICES="$(echo ${CHIPDBS:-xc7a50t xc7vx485t} | tr ' ' ';')" \
         -DHIMBAECHEL_PRJXRAY_DB="$deps/prjxray-db" -DCMAKE_BUILD_TYPE=Release \
         ${libs[@]+"${libs[@]}"}
     cmake --build "$out/nextpnr" --target nextpnr-himbaechel --parallel "$jobs"

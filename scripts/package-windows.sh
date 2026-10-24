@@ -16,6 +16,7 @@
 #   build-deps/prjxray/tools/          xc7frames2bit
 #   deps/prjxray-db                    the families in FAMILIES (default artix7 virtex7)
 #   xc7/, projects/, example.json
+#   README-Windows.txt                 running it, and the WinUSB driver step for programming (scripts/README-Windows.txt)
 #
 # Windows looks for a program's DLLs beside it first, so every directory with programs gets the MINGW64 DLLs they load.
 # synthgui runs the step commands itself (directPieces in main.cpp), so no shell is needed. Not signed (Authenticode is
@@ -73,6 +74,8 @@ rm -rf "$OUT"/xc7/__pycache__ "$OUT"/xc7/*.py   # the reference the built-in too
 mkdir -p "$OUT/projects"
 tar -C projects --exclude linux --exclude '*.log' -cf - . | tar -C "$OUT/projects" -xf -
 cp example.json "$OUT/"
+# how to run it, and the one-off WinUSB driver step openFPGALoader needs
+cp scripts/README-Windows.txt "$OUT/"
 
 # ---- every directory with programs gets the MINGW64 DLLs they (and, under bin/, the Qt plugins) load
 dlls() {  # the non-system DLLs FILE... load, as MSYS paths

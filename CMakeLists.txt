@@ -23,4 +23,19 @@ set_target_properties(synthgui PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${SYNTHGUI_VERSION}"
     MACOSX_BUNDLE_COPYRIGHT "Jonathan Kimmitt")
 target_link_libraries(synthgui PRIVATE Qt6::Widgets)
+# Windows: Qt, its plugins and every other DLL the build loads beside build/synthgui.exe, so it also starts from File
+# Explorer (MSYS2's and the Qt kit's DLLs are not on the system PATH). SYNTHGUI_DEPLOY=OFF to skip.
+option(SYNTHGUI_DEPLOY "Windows: copy the DLLs synthgui.exe needs beside it after each build" ON)
+if(WIN32 AND SYNTHGUI_DEPLOY)
+    get_target_property(qmake Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(qtbin "${qmake}" DIRECTORY)
+    get_filename_component(cxxbin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(WINDEPLOYQT NAMES windeployqt6 windeployqt HINTS "${qtbin}" REQUIRED)
+    add_custom_command(TARGET synthgui POST_BUILD
+        COMMAND "${WINDEPLOYQT}" --no-translations --no-system-d3d-compiler --no-opengl-sw --verbose 0
+                "$<TARGET_FILE:synthgui>"
+        COMMAND "${CMAKE_COMMAND}" "-DEXE=$<TARGET_FILE:synthgui>" "-DDIRS=${qtbin};${cxxbin}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/windows-deploy.cmake"
+        VERBATIM)
+endif()
 
