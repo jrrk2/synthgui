@@ -14,6 +14,10 @@
 //                                                     render one view from existing results and exit
 
 #include <QApplication>
+#include <QSettings>
+#include <QMenu>
+#include <QMenuBar>
+#include <QAction>
 #include <QIcon>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -90,6 +94,10 @@ int bram_fom_main(int argc, char** argv);
 // {defines}, {blackboxes}).
 struct Step {
     QString id, label, command;
+    // writes the board's non-volatile memory (a UF2 copied to its USB drive): Run all leaves it out unless Settings says
+    // otherwise. A project step says so with "nonvolatile": true; program_uf2 is one without having to.
+    bool nonvolatile = false;
+    bool operator==(const Step& o) const { return id == o.id; }
 };
 struct Project {
     QString path, dir, name, top, work, device, part, xdc;
@@ -164,6 +172,7 @@ struct Project {
         for (const auto& v : o.value("steps").toArray()) {
             const QJsonObject s = v.toObject();
             Step st{s.value("id").toString(), s.value("label").toString(), s.value("command").toString()};
+            st.nonvolatile = s.value("nonvolatile").toBool(st.id == "program_uf2");
             // the Synthesis panel's options go at the end of the synthesis command
             if (st.id == "synth" && !st.command.contains("{synth_options}")) st.command += " {synth_options}";
             steps << st;
@@ -999,6 +1008,48 @@ int runBuiltinTool(const QString& name, const QStringList& args) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- settings
+// Per user, not per project. SYNTHGUI_SETTINGS=file.ini keeps them in that file instead (for scripts and tests).
+namespace {
+
+QSettings appSettings() {
+    const QString file = qEnvironmentVariable("SYNTHGUI_SETTINGS");
+    return file.isEmpty() ? QSettings() : QSettings(file, QSettings::IniFormat);
+}
+// Run all (and --run all) write non-volatile memory only when this is on; it is off until somebody turns it on
+bool writeNonVolatileOnRunAll() { return appSettings().value("uf2/writeOnRunAll", false).toBool(); }
+void setWriteNonVolatileOnRunAll(bool on) { appSettings().setValue("uf2/writeOnRunAll", on); }
+
+class SettingsDialog final : public QDialog {
+public:
+    explicit SettingsDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle("Settings");
+        auto* v = new QVBoxLayout(this);
+        auto* box = new QGroupBox("UF2 targets (non-volatile)");
+        auto* bl = new QVBoxLayout(box);
+        write = new QCheckBox("Write the UF2 to the board when Run all is pressed");
+        write->setChecked(writeNonVolatileOnRunAll());
+        auto* note = new QLabel(
+            "Off by default. A UF2 target copies the bitstream to the board's USB drive (the Sonata's SONATA drive), "
+            "where the board's own firmware writes it to non-volatile flash, so it is what the board boots from after a "
+            "power cycle.\n\nWith this off, Run all leaves those steps out and says so; their own buttons in the toolbar "
+            "always work. The JTAG Program step loads the FPGA's volatile configuration and is not affected.");
+        note->setWordWrap(true);
+        bl->addWidget(write);
+        bl->addWidget(note);
+        v->addWidget(box);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(buttons, &QDialogButtonBox::accepted, this, [this] { save(); accept(); });
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        v->addWidget(buttons);
+        setMinimumWidth(480);
+    }
+    void save() { setWriteNonVolatileOnRunAll(write->isChecked()); }
+    QCheckBox* write = nullptr;
+};
+
+}  // namespace
+
 class MainWindow final : public QMainWindow {
 public:
     ~MainWindow() override {
@@ -1129,6 +1180,13 @@ public:
         split->setSizes({380, 1120});
         setCentralWidget(split);
 
+        // Settings: the standard Preferences item on macOS (the application menu, Cmd+,), File > Settings... elsewhere
+        auto* prefs = new QAction("Settings...", this);
+        prefs->setMenuRole(QAction::PreferencesRole);
+        prefs->setShortcut(QKeySequence::Preferences);
+        connect(prefs, &QAction::triggered, this, [this] { SettingsDialog(this).exec(); });
+        menuBar()->addMenu("&File")->addAction(prefs);
+
         // pipeline
         auto* tb = addToolBar("Flow");
         for (const Step& s : m_p.steps) {
@@ -1139,7 +1197,13 @@ public:
             statusBar()->addPermanentWidget(m_stepStatus[s.id]);
         }
         tb->addSeparator();
-        tb->addAction("Run all", this, [this] { runSteps(m_p.steps); });
+        tb->addAction("Run all", this, [this] {
+            QStringList left;
+            const QList<Step> steps = runAllSteps(&left);
+            if (!left.isEmpty())
+                statusBar()->showMessage("Run all leaves out " + left.join(", ") + " (writes non-volatile memory; Settings... turns it on)", 12000);
+            runSteps(steps);
+        });
         tb->addAction("Stop", this, [this] { stop(); });
         tb->addAction("Reload results", this, [this] { refreshAll(); });
         tb->addSeparator();
@@ -1192,10 +1256,26 @@ protected:
     }
 
 public:
+    // the steps of Run all: every step, except non-volatile ones unless Settings has them on (left gets the labels of those)
+    QList<Step> runAllSteps(QStringList* left = nullptr) const {
+        const bool nv = writeNonVolatileOnRunAll();
+        QList<Step> r;
+        for (const Step& s : m_p.steps) {
+            if (s.nonvolatile && !nv) { if (left) *left << s.label; continue; }
+            r << s;
+        }
+        return r;
+    }
     // batch: run these steps (ids, or "all"), then call done(ok)
     void runThen(const QStringList& ids, std::function<void(bool)> done) {
         QList<Step> steps;
-        for (const Step& s : m_p.steps) if (ids.contains("all") || ids.contains(s.id)) steps << s;
+        QStringList left;
+        const QList<Step> all = runAllSteps(&left);
+        for (const Step& s : m_p.steps)
+            if (ids.contains(s.id) || (ids.contains("all") && all.contains(s))) steps << s;
+        if (ids.contains("all") && !left.isEmpty())
+            fprintf(stderr, "synthgui: --run all leaves out %s (writes non-volatile memory; Settings turns it on, or name the step)\n",
+                    qPrintable(left.join(", ")));
         m_done = std::move(done);
         runSteps(steps);
     }
@@ -1878,6 +1958,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     QApplication app(argc, argv);
+    QCoreApplication::setOrganizationDomain("kimmitt.uk");     // settings: uk.kimmitt.synthgui on macOS
+    QCoreApplication::setApplicationName("synthgui");
     {   // the OpenXC7 logo (assets/): title bar, taskbar, and the Dock when not started from synthgui.app
         QIcon appIcon;
         for (int s : {16, 24, 32, 48, 64, 128, 256}) appIcon.addFile(QString(":/icon/synthgui-%1.png").arg(s), QSize(s, s));
@@ -1894,11 +1976,24 @@ int main(int argc, char** argv) {
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
     cl.addOption({"work", "use this work directory instead of the project's own", "dir"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
+    QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog, set its UF2 checkbox on or off (keep: leave it), "
+                                       "--screenshot it, accept it and print what is stored", "on|off|keep");
+    selftestSettings.setFlags(QCommandLineOption::HiddenFromHelp);
+    cl.addOption(selftestSettings);
     QCommandLineOption selftest("selftest-new", "fill and create a new project: name,out.json,work,xdc,src...", "fields");
     selftest.setFlags(QCommandLineOption::HiddenFromHelp);
     cl.addOption(selftest);
     cl.process(app);
     if (cl.isSet("work")) Project::workOverride = QDir(cl.value("work")).absoluteFilePath(".");
+    if (cl.isSet("selftest-settings")) {  // drive the Settings dialog without a user
+        SettingsDialog d;
+        const QString v = cl.value("selftest-settings");
+        if (v == "on" || v == "off") d.write->setChecked(v == "on");
+        if (cl.isSet("screenshot")) { d.show(); app.processEvents(); d.grab().save(cl.value("screenshot")); }
+        d.save();
+        std::printf("uf2/writeOnRunAll=%d\n", writeNonVolatileOnRunAll() ? 1 : 0);
+        return 0;
+    }
     Project p;
     QString err;
     QString file = cl.value("project");
