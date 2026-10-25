@@ -186,7 +186,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install packages
-        run: brew install qt cmake ninja boost eigen autoconf automake libtool bison flex help2man tcl-tk@8 swig libffi pkgconf jq
+        run: brew install qt cmake ninja boost eigen autoconf automake libtool bison flex help2man tcl-tk@8 swig libffi pkgconf googletest jq
 
       - name: Cache key (submodule commits, build-deps.sh)
         id: key
@@ -199,11 +199,34 @@ jobs:
           key: ${{ steps.key.outputs.key }}
           path: *tools
 
-      - name: Build the tools
+      # verilator, prjxray, nextpnr and fasm2netlist take about an hour; they are cached on their own, so a failure in OpenSTA (the
+      # last tool) does not lose them
+      - name: Restore the first four tools
+        id: cache-a
         if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}-a
+          path: *tools
+
+      - name: Build verilator, prjxray, nextpnr and fasm2netlist
+        if: steps.cache.outputs.cache-hit != 'true' && steps.cache-a.outputs.cache-hit != 'true'
         run: |
           git submodule update --init --depth 1
-          scripts/build-deps.sh verilator prjxray nextpnr fasm2netlist sta
+          scripts/build-deps.sh verilator prjxray nextpnr fasm2netlist
+
+      - name: Save the first four tools
+        if: steps.cache.outputs.cache-hit != 'true' && steps.cache-a.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.key.outputs.key }}-a
+          path: *tools
+
+      - name: Build OpenSTA
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 deps/OpenSTA deps/cudd
+          scripts/build-deps.sh sta
           rm -f build-deps/prefix/bin/*_dbg
 
       # saved here, not at the end of the job: a project that fails must not throw the build away
@@ -215,7 +238,6 @@ jobs:
           path: *tools
 
       - name: prjxray-db
-        if: steps.cache.outputs.cache-hit == 'true'
         run: git submodule update --init --depth 1 deps/prjxray-db
 
       - name: Build synthgui
