@@ -1425,6 +1425,7 @@ private:
     }
     void appendLog(const QByteArray& b) {
         m_logFile.write(b);
+        m_logFile.flush();  // the file is read while the step runs (batch mode, tail -f)
         m_curLog->moveCursor(QTextCursor::End);
         m_curLog->insertPlainText(QString::fromLocal8Bit(b));
         m_curLog->moveCursor(QTextCursor::End);

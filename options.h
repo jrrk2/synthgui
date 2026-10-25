@@ -59,6 +59,14 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "Write the EDIF as one flat cell rather than with the design's hierarchy."},
         {"synth.keep_temps", "Keep ABC's files", OptionSpec::Bool, "1", "--map-only-keep-temps", false,
          "Keep the AIGER and BLIF files handed to and from ABC beside the netlist."},
+        {"synth.whole_program", "Whole-program LUT mapping", OptionSpec::Bool, "1", "--map-only-whole-program", true,
+         "Hand ABC the whole design as one AIG rather than one partition per module instance (small "
+         "instances folded into their parent).  LUTs can then span any instance boundary, at the cost "
+         "of ABC's time and memory on the full design."},
+        {"synth.partition_min", "Smallest mapped instance (AND nodes)", OptionSpec::Int, "1000",
+         "--map-only-partition-min {}", true,
+         "Per-instance mapping folds an instance with fewer AND nodes than this into its parent's "
+         "partition, so LUTs can span the boundaries of small modules.", "", 0, 1e9},
 
         // ---- synthesis: Verilator's warnings, each one checked is not reported
         {"synth.warn.WIDTHTRUNC", "WIDTHTRUNC: value truncated to a narrower target", OptionSpec::Bool, "1", "-Wno-WIDTHTRUNC", false,
