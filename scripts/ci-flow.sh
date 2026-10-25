@@ -13,7 +13,7 @@
 #
 # Besides the steps, two things are checked, because a step exiting 0 does not say the result is still the right one:
 #   timing    nextpnr meets every clock target: the last "Max frequency" line of each clock says PASS (nextpnr exits 0 when it
-#             does not, as the projects pass --timing-allow-fail);
+#             does not, as the projects pass --timing-allow-fail); a design with no clock at all passes;
 #   baseline  the FASM and frames are the ones recorded in ci/expected/<platform>.txt (<platform> is `uname -s`-`uname -m`).
 #             The same inputs give the same output on one machine, so a change in the hashes is a change in the flow: a tool,
 #             a project, a submodule.  If it is intended, CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those
@@ -40,7 +40,11 @@ timing_check() {
     local log=$1/pnr.log final
     [ -f "$log" ] || { echo "no pnr.log"; return 1; }
     final=$(grep -h "Max frequency for clock" "$log" | awk -F"'" '{last[$2]=$0} END {for (c in last) print last[c]}')
-    [ -n "$final" ] || { echo "no clock report"; return 1; }
+    if [ -z "$final" ]; then
+        # a design with no clock (the LED and flash probes) has nothing to time: nextpnr says nothing and exits normally
+        grep -q "Program finished normally" "$log" && { echo "no clock in the design"; return 0; }
+        echo "no clock report"; return 1
+    fi
     if echo "$final" | grep -q "FAIL"; then
         echo "$final" | grep FAIL | sed "s/.*clock *'\\([^']*\\)': \\([0-9.]*\\) MHz (FAIL at \\([0-9.]*\\) MHz)/\\1 \\2 MHz, target \\3/" | tr '\n' ';'
         return 1

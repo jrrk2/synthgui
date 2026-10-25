@@ -1,0 +1,65 @@
+{
+  "name": "vc707 bpi bridge",
+  "top": "vc707_bpi_bridge",
+  "work": "~/synthgui-work/vc707_bpi_bridge",
+  "device": "xc7vx485t",
+  "part": "xc7vx485tffg1761-2",
+  "xdc": "{root}/projects/vc707_bpi_bridge-src/vc707_bpi_bridge.xdc",
+  "srcdir": "{root}/projects/vc707_bpi_bridge-src",
+  "sources": [
+    "{root}/projects/vc707_bpi_bridge-src/vc707_bpi_bridge.v",
+    "{root}/projects/vc707_bpi_bridge-src/bpiOverJtag_core_io.v"
+  ],
+  "incdirs": [],
+  "defines": [
+    "SYNTHESIS"
+  ],
+  "blackboxes": [
+    "BSCANE2",
+    "IOBUF",
+    "STARTUPE2",
+    "BUFG"
+  ],
+  "verilator": "{prefix}/bin/verilator_bin",
+  "verilator_root": "{prefix}/share/verilator",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "nextpnr_flags": "--router router2 --timing-allow-fail",
+  "prjxray_db": "{deps}/prjxray-db",
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "sta": "{prefix}/bin/sta",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "steps": [
+    {
+      "id": "synth",
+      "label": "Synthesize",
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+    },
+    {
+      "id": "pnr",
+      "label": "Place & Route",
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"
+    },
+    {
+      "id": "bit",
+      "label": "Bitstream",
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}"
+    },
+    {
+      "id": "program",
+      "label": "Program",
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    }
+  ],
+  "capacity": {
+    "LUT": 303600,
+    "FF": 607200,
+    "RAMB36": 1030,
+    "LUTRAM": 130800,
+    "DSP": 2800,
+    "IO": 700,
+    "BUFG": 32
+  },
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
+  "family": "virtex7"
+}

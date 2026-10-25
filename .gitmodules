@@ -11,7 +11,7 @@
 	url = https://github.com/jrrk2/OpenSTA.git
 [submodule "deps/openFPGALoader"]
 	path = deps/openFPGALoader
-	url = https://github.com/trabucayre/openFPGALoader.git
+	url = https://github.com/jrrk2/openFPGALoader.git
 [submodule "deps/cudd"]
 	path = deps/cudd
 	url = https://github.com/The-OpenROAD-Project/cudd.git

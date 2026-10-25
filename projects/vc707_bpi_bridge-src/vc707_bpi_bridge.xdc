@@ -1,0 +1,53 @@
+# The VC707 linear BPI flash (U3), from UG885 v1.8 Table 1-5, all LVCMOS18.
+# bpi_addr[n] is flash pin A<n+1>, on net FLASH_A<n>; bpi_dq[n] is flash DQ<n>, net FLASH_D<n>; bpi_we_n is FPGA_FWE_B (BB41),
+# bpi_oe_n FLASH_OE_B, bpi_ce_n FLASH_CE_B, bpi_adv_n FLASH_ADV_B. The two top address lines, FLASH_A24 (flash A25, RS0, SW11-2) and
+# FLASH_A25 (flash A26, RS1, SW11-1), are driven by the DIP switch and are not constrained: the bridge leaves them alone.
+# FPGA_CCLK (N10, flash CLK) and FPGA_INIT_B (AG11, flash RST_B) are dedicated configuration pins, not used;
+# FLASH_WAIT (AM34) is not used (asynchronous reads and writes).
+
+set_property -dict {PACKAGE_PIN AJ28 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[0]}]
+set_property -dict {PACKAGE_PIN AH28 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[1]}]
+set_property -dict {PACKAGE_PIN AG31 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[2]}]
+set_property -dict {PACKAGE_PIN AF30 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[3]}]
+set_property -dict {PACKAGE_PIN AK29 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[4]}]
+set_property -dict {PACKAGE_PIN AK28 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[5]}]
+set_property -dict {PACKAGE_PIN AG29 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[6]}]
+set_property -dict {PACKAGE_PIN AK30 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[7]}]
+set_property -dict {PACKAGE_PIN AJ30 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[8]}]
+set_property -dict {PACKAGE_PIN AH30 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[9]}]
+set_property -dict {PACKAGE_PIN AH29 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[10]}]
+set_property -dict {PACKAGE_PIN AL30 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[11]}]
+set_property -dict {PACKAGE_PIN AL29 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[12]}]
+set_property -dict {PACKAGE_PIN AN33 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[13]}]
+set_property -dict {PACKAGE_PIN AM33 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[14]}]
+set_property -dict {PACKAGE_PIN AM32 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[15]}]
+set_property -dict {PACKAGE_PIN AV41 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[16]}]
+set_property -dict {PACKAGE_PIN AU41 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[17]}]
+set_property -dict {PACKAGE_PIN BA42 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[18]}]
+set_property -dict {PACKAGE_PIN AU42 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[19]}]
+set_property -dict {PACKAGE_PIN AT41 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[20]}]
+set_property -dict {PACKAGE_PIN BA40 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[21]}]
+set_property -dict {PACKAGE_PIN BA39 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[22]}]
+set_property -dict {PACKAGE_PIN BB39 IOSTANDARD LVCMOS18} [get_ports {bpi_addr[23]}]
+
+set_property -dict {PACKAGE_PIN AM36 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[0]}]
+set_property -dict {PACKAGE_PIN AN36 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[1]}]
+set_property -dict {PACKAGE_PIN AJ36 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[2]}]
+set_property -dict {PACKAGE_PIN AJ37 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[3]}]
+set_property -dict {PACKAGE_PIN AK37 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[4]}]
+set_property -dict {PACKAGE_PIN AL37 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[5]}]
+set_property -dict {PACKAGE_PIN AN35 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[6]}]
+set_property -dict {PACKAGE_PIN AP35 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[7]}]
+set_property -dict {PACKAGE_PIN AM37 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[8]}]
+set_property -dict {PACKAGE_PIN AG33 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[9]}]
+set_property -dict {PACKAGE_PIN AH33 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[10]}]
+set_property -dict {PACKAGE_PIN AK35 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[11]}]
+set_property -dict {PACKAGE_PIN AL35 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[12]}]
+set_property -dict {PACKAGE_PIN AJ31 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[13]}]
+set_property -dict {PACKAGE_PIN AH34 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[14]}]
+set_property -dict {PACKAGE_PIN AJ35 IOSTANDARD LVCMOS18} [get_ports {bpi_dq[15]}]
+
+set_property -dict {PACKAGE_PIN BB41 IOSTANDARD LVCMOS18} [get_ports bpi_we_n]
+set_property -dict {PACKAGE_PIN BA41 IOSTANDARD LVCMOS18} [get_ports bpi_oe_n]
+set_property -dict {PACKAGE_PIN AL36 IOSTANDARD LVCMOS18} [get_ports bpi_ce_n]
+set_property -dict {PACKAGE_PIN AY37 IOSTANDARD LVCMOS18} [get_ports bpi_adv_n]

@@ -138,6 +138,21 @@ toolchain paths, steps, part and black boxes. Then add sources with the file pic
 "Open existing..." in the dialog, or "Open project..." on the toolbar, opens a project
 file in a new window.
 
+## VC707 linear BPI flash
+
+The VC707's 128 MB flash (U3) is reached through a JTAG bridge built with this flow: `projects/vc707_bpi_bridge` (openFPGALoader's
+`bpiOverJtag` core, Apache-2.0, with the data bus split for the pad buffers). openFPGALoader (the `jrrk2` fork, which has the `vc707`
+board) looks for it as `bpiOverJtag_xc7vx485tffg1761.bit.gz` in `OPENFPGALOADER_SOJ_DIR`; the bridge's own `.bit` is gzipped to that name.
+
+    openFPGALoader -b vc707 -f johnson.bit                      write the image at slot offset 0
+    openFPGALoader -b vc707 --dump-flash --offset 0 --file-size 256 out.bin
+
+SW11 positions 1 and 2 drive the flash's two top address lines, so they choose which of the four 32 MiB boot slots the bridge reads
+and writes (and boots from at power-on); the bridge leaves those two lines alone. A write erases the 256 KiB blocks it covers: nothing
+writes the flash unless asked. `projects/vc707_ledtest` (fixed pattern on the user LEDs) and `projects/vc707_flashprobe` (a static
+read of the flash shown on the LEDs, DIP switches as the address) separate pad problems from protocol problems. They have no
+clock, so the CI timing check passes them as having nothing to time.
+
 ## Dependencies and macOS
 
 The tools the flow calls are submodules under `deps/`:

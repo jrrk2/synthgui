@@ -55,7 +55,7 @@ env:
     qt6-base-dev libgl-dev jq
   QUICK: >-
     sonata_johnson sonata_telegraph sonata_lcd sonata_bramtest sonata_hyperram
-    johnson counter vc707_calc vc707_bramtest
+    johnson counter vc707_calc vc707_bramtest vc707_ledtest vc707_flashprobe vc707_bpi_bridge
   # vc707_ethmin is with the long designs because nextpnr's placer had not finished it after 48 minutes on a runner (the other
   # Virtex-7 projects take 10 to 90 seconds); it comes back to QUICK when that is understood
   LONG: cdc6000 vc707_cdc_eth vc707_ethmin vc707_romlinux sonata_romlinux
