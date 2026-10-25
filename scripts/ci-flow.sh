@@ -14,8 +14,8 @@
 # Besides the steps, two things are checked, because a step exiting 0 does not say the result is still the right one:
 #   timing    nextpnr meets every clock target: the last "Max frequency" line of each clock says PASS (nextpnr exits 0 when it
 #             does not, as the projects pass --timing-allow-fail); a design with no clock at all passes;
-#   baseline  the FASM and frames are the ones recorded in ci/expected/<platform>.txt (<platform> is `uname -s`-`uname -m`).
-#             The same inputs give the same output on one machine, so a change in the hashes is a change in the flow: a tool,
+#   baseline  the frames (the bitstream's content) are the ones recorded in ci/expected/<platform>.txt (<platform> is `uname -s`-`uname -m`).
+#             The same inputs give the same bitstream on one machine, so a change in the hash is a change in the flow: a tool,
 #             a project, a submodule.  If it is intended, CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those
 #             projects' lines (the CI job uploads hashes.txt, in the same format, for refreshing a platform from its runner).
 #             Floating point in the placer can differ between platforms, hence one file each; a platform or project with no
@@ -96,10 +96,11 @@ for name in "$@"; do
         fi
     fi
 
-    # baseline: the bit step wrote the frames from the FASM
-    if [ "$mode" != off ] && [ $ok = 1 ] && [ -f "$work/$top.fasm" ] && [ -f "$work/$top.frames" ]; then
+    # baseline: the bit step wrote the frames from the FASM; the frames are what is compared, because the FASM text of the same
+    # design differs between builds of nextpnr (all twelve projects, macOS runner against the iMac) while the frames do not
+    if [ "$mode" != off ] && [ $ok = 1 ] && [ -f "$work/$top.frames" ]; then
         res="ok"
-        for a in fasm frames; do
+        for a in frames; do
             h=$(sha "$work/$top.$a")
             echo "$name $a $h" >> "$base/hashes.txt"
             r=$(recorded "$name" "$a")
@@ -126,7 +127,7 @@ if [ "$mode" = update ]; then
     if [ -s "$base/hashes.txt" ]; then
         mkdir -p "$(dirname "$expected")"
         # replace the lines of the projects that produced new hashes; keep the others' (a project that failed keeps its line)
-        { echo "# $platform: sha256 of each project's FASM and frames; CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those projects' lines"
+        { echo "# $platform: sha256 of each project's frames (the FASM text's line order is not stable between builds); CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those projects' lines"
           { [ -f "$expected" ] && grep -v '^#' "$expected" | awk 'NR==FNR {new[$1]=1; next} !($1 in new)' "$base/hashes.txt" -
             cat "$base/hashes.txt"; } | sort -u; } > "$expected.new" && mv "$expected.new" "$expected"
         echo "baseline: $expected has $(grep -vc '^#' "$expected") lines"
