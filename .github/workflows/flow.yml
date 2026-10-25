@@ -225,6 +225,10 @@ jobs:
       - name: Build OpenSTA
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
+          # flex is keg-only: its FlexLexer.h is on no default search path, and OpenSTA's CMake fails with FLEX_INCLUDE_DIR
+          # NOTFOUND (it only works on a Mac that also has MacPorts). Said through the environment, not build-deps.sh, whose
+          # hash is part of the cache key.
+          export CMAKE_PREFIX_PATH="$(brew --prefix flex)"
           git submodule update --init --depth 1 deps/OpenSTA deps/cudd
           scripts/build-deps.sh sta
           rm -f build-deps/prefix/bin/*_dbg
