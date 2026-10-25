@@ -237,6 +237,19 @@ jobs:
           key: ${{ steps.key.outputs.key }}
           path: *tools
 
+      # Whatever supplied them (the cache or the build), the tools must be allowed to run: macOS kills a binary whose signature does
+      # not verify ("Killed: 9", exit 137), and a runner's arrangements are not this repository's. So: no quarantine flags, and any
+      # tool whose signature does not verify gets a fresh ad-hoc one. The signature is accepted as it is, nothing is checked against
+      # a certificate; the release build (package-macos.sh) is where Developer ID signing happens, and it is not part of CI.
+      - name: Let macOS run the tools
+        run: |
+          xattr -cr build-deps 2>/dev/null || true
+          for f in build-deps/prefix/bin/* build-deps/nextpnr/nextpnr-himbaechel build-deps/fasm2netlist/tileverilog \
+                   build-deps/fasm2netlist/lvs_equiv build-deps/prjxray/tools/xc7frames2bit; do
+            [ -f "$f" ] && file -b "$f" | grep -q Mach-O || continue
+            codesign --verify "$f" 2>/dev/null || { echo "re-signing $f"; codesign --force --sign - "$f"; }
+          done
+
       - name: prjxray-db
         run: git submodule update --init --depth 1 deps/prjxray-db
 
