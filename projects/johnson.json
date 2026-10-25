@@ -68,6 +68,12 @@
       "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}",
       "id": "program",
       "label": "Program"
+    },
+    {
+      "id": "program_flash",
+      "label": "Program (BPI flash)",
+      "command": "OPENFPGALOADER_SOJ_DIR={bpi_bridge_dir} {openfpgaloader} -b vc707 -f {bit}",
+      "nonvolatile": true
     }
   ],
   "top": "top",
@@ -94,5 +100,6 @@
     "synth.warn.TIMESCALEMOD": "1",
     "synth.warn.SPECIFYIGN": "1"
   },
-  "family": "virtex7"
+  "family": "virtex7",
+  "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge"
 }

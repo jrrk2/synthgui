@@ -147,6 +147,13 @@ board) looks for it as `bpiOverJtag_xc7vx485tffg1761.bit.gz` in `OPENFPGALOADER_
     openFPGALoader -b vc707 -f johnson.bit                      write the image at slot offset 0
     openFPGALoader -b vc707 --dump-flash --offset 0 --file-size 256 out.bin
 
+openFPGALoader takes the BPI bridge only from that directory (`-B` is for the SPI one), and opens `….bit` when there is no
+`….bit.gz`. In synthgui the bridge project's *Bridge for openFPGALoader* step copies its bitstream to
+`bpiOverJtag_xc7vx485tffg1761.bit` in its work directory, and the VC707 projects' *Program (BPI flash)* step (`program_flash`)
+runs `openFPGALoader -b vc707 -f {bit}` with `OPENFPGALOADER_SOJ_DIR` set to that directory (the project's `bpi_bridge_dir`), so
+build the bridge project once first. The step writes non-volatile memory, so *Run all* leaves it out unless Settings says
+otherwise; its own button always runs it.
+
 SW11 positions 1 and 2 drive the flash's two top address lines, so they choose which of the four 32 MiB boot slots the bridge reads
 and writes (and boots from at power-on); the bridge leaves those two lines alone. A write erases the 256 KiB blocks it covers: nothing
 writes the flash unless asked. `projects/vc707_ledtest` (fixed pattern on the user LEDs) and `projects/vc707_flashprobe` (a static

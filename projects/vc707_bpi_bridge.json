@@ -46,6 +46,11 @@
       "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}"
     },
     {
+      "id": "bridge",
+      "label": "Bridge for openFPGALoader",
+      "command": "cp {bit} {work}/bpiOverJtag_xc7vx485tffg1761.bit"
+    },
+    {
       "id": "program",
       "label": "Program",
       "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
