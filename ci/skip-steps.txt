@@ -1,3 +1,2 @@
 # Steps CI leaves out of a project, and why:  PROJECT  STEP  reason.
 # The job summary lists each as "skipped" with this reason, so it is never silent; delete the line once the step passes.
-vc707_bramtest lvs  lvs_equiv cannot trace BUFGCTRL_X0Y21's input (the MMCM's CLKOUT1) in the bitstream: 17541 proved, 1 differs
