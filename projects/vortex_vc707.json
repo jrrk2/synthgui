@@ -1,0 +1,91 @@
+{
+  "name": "vortex vc707",
+  "top": "vortex_vc707",
+  "work": "~/synthgui-work/vortex_vc707",
+  "device": "xc7vx485t",
+  "part": "xc7vx485tffg1761-2",
+  "family": "virtex7",
+  "xdc": "~/vortex/hw/syn/xilinx/vc707/vortex_vc707_open.xdc",
+  "srcdir": "{root}/projects/vortex_vc707-src",
+  "sources": [
+    "~/vortex/hw/rtl/VX_gpu_pkg.sv",
+    "~/vortex/hw/rtl/fpu/VX_fpu_pkg.sv",
+    "~/vortex/hw/rtl/vm/VX_tlb_pkg.sv",
+    "~/vortex/hw/rtl/VX_trace_pkg.sv",
+    "~/vortex/hw/syn/xilinx/vc707/clkgen_vc707.sv",
+    "~/vortex/hw/syn/xilinx/vc707/vortex_vc707.sv"
+  ],
+  "incdirs": [
+    "~/vortex/build/sw",
+    "~/vortex/build/hw",
+    "~/vortex/hw/syn/xilinx/vc707",
+    "~/vortex/hw/rtl",
+    "~/vortex/hw/rtl/libs",
+    "~/vortex/hw/rtl/interfaces",
+    "~/vortex/hw/rtl/core",
+    "~/vortex/hw/rtl/mem",
+    "~/vortex/hw/rtl/vm",
+    "~/vortex/hw/rtl/cache",
+    "~/vortex/hw/rtl/cp",
+    "~/vortex/hw/rtl/fpu"
+  ],
+  "defines": [
+    "SYNTHESIS",
+    "NDEBUG",
+    "VX_CFG_XLEN=32",
+    "VX_CFG_XLEN_32",
+    "VX_CFG_EXT_F_DISABLE"
+  ],
+  "blackboxes": [
+    "BUFG",
+    "IBUFDS",
+    "MMCME2_ADV",
+    "IBUF",
+    "OBUF",
+    "RAMB36E1"
+  ],
+  "verilator": "{prefix}/bin/verilator_bin",
+  "verilator_root": "{prefix}/share/verilator",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60",
+  "prjxray_db": "{deps}/prjxray-db",
+  "sta": "{prefix}/bin/sta",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "steps": [
+    {
+      "id": "synth",
+      "label": "Synthesize",
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+    },
+    {
+      "id": "pnr",
+      "label": "Place & Route",
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}"
+    },
+    {
+      "id": "sta",
+      "label": "OpenSTA",
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl"
+    },
+    {
+      "id": "bit",
+      "label": "Bitstream",
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}"
+    },
+    {
+      "id": "program",
+      "label": "Program",
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    }
+  ],
+  "capacity": {
+    "LUT": 303600,
+    "FF": 607200,
+    "RAMB36": 1030,
+    "LUTRAM": 130800,
+    "DSP": 2800,
+    "IO": 700,
+    "BUFG": 32
+  }
+}
