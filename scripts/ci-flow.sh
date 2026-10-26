@@ -14,6 +14,7 @@
 # Besides the steps, two things are checked, because a step exiting 0 does not say the result is still the right one:
 #   timing    nextpnr meets every clock target: the last "Max frequency" line of each clock says PASS (nextpnr exits 0 when it
 #             does not, as the projects pass --timing-allow-fail); a design with no clock at all passes;
+#   roms      the ROMs the synthesis made, written back into the routed FASM from their own files, change nothing;
 #   baseline  the frames (the bitstream's content) are the ones recorded in ci/expected/<platform>.txt (<platform> is `uname -s`-`uname -m`).
 #             The same inputs give the same bitstream on one machine, so a change in the hash is a change in the flow: a tool,
 #             a project, a submodule.  If it is intended, CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those
@@ -93,6 +94,20 @@ for name in "$@"; do
         else
             printf '| %s | timing | **FAILED** %s | |\n' "$name" "$t" | tee -a "$summary"
             failed+=("$name/timing")
+        fi
+    fi
+
+    # roms: the memories the synthesis made (its --map-only-meminit manifest), each written back into the routed FASM from the file it
+    # was synthesized from, must change nothing: that is the layout bram-init (the ROMs tab of the Block RAMs window) relies on
+    if [ -f "$work/pnr.status" ] && [ -f "$work/${top}_meminit.json" ]; then
+        if r=$("$bin" --tool bram-init --fasm "$work/$top.fasm" --placement "$work/${top}_placement.json" --meminit "$work/${top}_meminit.json" \
+                   --check --rom all 2>&1); then
+            n=$(printf '%s\n' "$r" | grep -c ' cells, ')
+            printf '| %s | roms | ok (%s from their files change nothing) | |\n' "$name" "$n" | tee -a "$summary"
+        else
+            printf '| %s | roms | **FAILED** %s | |\n' "$name" "$(printf '%s\n' "$r" | tail -1)" | tee -a "$summary"
+            printf '%s\n' "$r" | tail -20
+            failed+=("$name/roms")
         fi
     fi
 

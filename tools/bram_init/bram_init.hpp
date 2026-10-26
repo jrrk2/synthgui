@@ -81,4 +81,47 @@ std::vector<uint8_t> read_bytes(const std::string& path);
 std::string hex_dump(const Image& img, size_t max_words = 0);
 int width_from_code(int code, bool ramb36);   // FASM width marker -> port width
 
+
+// ---- the memories the synthesis made (verilator --map-only-meminit) ----
+//
+// The mapper writes one entry per block RAM memory: the $readmemh file it was initialised from, the word width and depth, and
+// for each block RAM cell the slice of the memory it holds: cell <name>_t<lane>[_d<block>] has data bits [bit_lo, bit_lo+bits)
+// of the words [word_lo, word_lo+words_per_block). With a placement (cell names -> tiles) a whole new memory image becomes
+// the contents of every block RAM of that memory.
+struct MemCell {
+    std::string cell;
+    int lane = 0, block = 0, bit_lo = 0, bits = 0, word_lo = 0;
+};
+
+struct Memory {
+    std::string name, type, kind, primitive;
+    std::string init_file, init_path;          // as $readmemh named it; the same made absolute by the mapper
+    int width = 0, depth = 0;                  // the memory's words
+    int lane_bits = 0, lanes = 0, blocks = 0, words_per_block = 0;
+    bool cascade = false;
+    std::vector<MemCell> cells;
+};
+
+struct Manifest {
+    std::string path, top;
+    std::vector<Memory> memories;
+    const Memory* find(const std::string& name) const;
+};
+
+Manifest load_manifest(const std::string& path);                  // throws std::runtime_error
+// The words of a whole memory image: $readmemh text (.hex .mem .init .txt, or what the mapper read) or raw little-endian words.
+// Wider than `width` bits, or longer than `depth` words, is an error.
+std::vector<uint64_t> load_words(const std::string& path, int width, int depth);
+// The block RAM holding the manifest cell, by its placed name; nullptr when the placement has no such cell
+const Bram* bram_of(const Fasm& f, const MemCell& c);
+// The slice of a memory image that the block RAM of cell `c` holds
+Image cell_image(const Memory& m, const MemCell& c, const std::vector<uint64_t>& words, const Bram& b);
+
+struct RomResult {
+    int cells = 0, placed = 0, changed = 0;
+    std::vector<std::string> missing;          // manifest cells the placement does not have (first few)
+};
+// Writes the whole memory image into every block RAM of the memory that the FASM has (when `apply` is false, only counts).
+RomResult update_memory(Fasm& f, const Memory& m, const std::vector<uint64_t>& words, bool apply);
+
 }  // namespace bram_init

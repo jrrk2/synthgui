@@ -190,6 +190,45 @@ words; `lane<NN>.hex` files by a number in the cell name; or one flat binary spl
 Bitstream step: the new `.bit` is seconds away, the placement and routing untouched. A FASM cannot tell an x36 RAMB36E1
 from two x18 RAMB18E1 in one tile; the placement settles it, and the Block cell can be edited to `36` or `18` when there is none.
 
+**ROMs tab.** Picking block RAMs one by one is for a few of them; a ROM of 600 block RAMs wants the memory, not its tiles. The
+Synthesis step writes `<top>_meminit.json` (`verilator --map-only-meminit`, in every project): each memory the mapper put in block
+RAM, with the `$readmemh` file it was initialised from, its width and depth, and for every cell the lane (data bits) and block
+(words) of the memory it holds. The ROMs tab of the Block RAMs window reads it, matches the cells against the placement, and
+lists the memories: name, size, cells placed, the file they were synthesized from. A memory without a file (a RAM) is hidden
+unless "Also the memories not read from a file" is on.
+
+- **ROM image...** sets another image for the selected ROM (`.hex`/`.mem`/`.init` as `$readmemh`, anything else raw
+  little-endian words). **Apply ROMs** gives the cells of the selected ROMs (all, when none is selected) their slice of it; the
+  Block RAMs tab shows them as "will change", **Save** writes the FASM, **Save + Bitstream** also runs the project's Bitstream
+  step. Only fasm2frames and the bitstream run again: seconds, not a place and route. A ROM written back from the file it
+  was synthesized from changes nothing, which `scripts/ci-flow.sh` checks after every place and route (the `roms` row).
+- **ROM build...** gives the ROM a shell command that builds its image from source, run in a directory of your choice,
+  with the step placeholders (`{srcdir}`, `{work}`, `{root}`, ...) and `{rom}` (its name) and `{image}` (the output file
+  below). **Output** is the file it writes. **Build ROM** runs the command of each selected ROM (its output appears below),
+  uses the output as the image and applies it. A command that fails, or that does not write its output, changes nothing.
+  ROM setups are kept in the project file, under `"roms"`:
+
+      "roms": {"rom_inst": {"build": "make -C {srcdir}/fw hex && cp {srcdir}/fw/fw.hex {image}",
+                            "dir": "{srcdir}", "output": "{work}/rom_inst.hex"}}
+
+The same from a script: `synthgui --tool bram-init --fasm routed.fasm --placement routed_placement.json --meminit top_meminit.json
+--roms` lists the memories, `--rom NAME=image` (or `--rom all`, each from its own file; `--check` only reports) writes new
+contents, `--out patched.fasm` saves them. A ROM patched this way is the same, line for line, as the FASM of a complete
+synthesis and place and route run with the new image (checked on vc707_bramtest; and the 639,495-word ROM of vc707_romlinux, 640
+block RAMs, is rewritten in under a second).
+
+**sonata_picture** (`projects/sonata_picture*`) is a worked example of that flow: the Sonata LiteX SoC and pinout of
+sonata_romlinux with a 54-byte bare-metal program in the boot ROM in place of the BIOS. It turns the LED chaser off, writes
+a 160x128 RGB565 picture (assembled in with `.incbin`) to the LCD frame buffer and selects graphics mode (word 81 of the
+LCD control window, as `sonata_lcdfb` does); then, as the ROM Linux's `photobox` does, it shows each frame of
+`/usr/share/photobox` in turn (8 s by default), read in place from the SPI flash where the rootfs partition holds them
+(`mkrom photos` finds their offsets in `rootfs.romfs`). Everything the program shows is ROM contents, so
+`make -C projects/sonata_picture-src/fw PICTURE=my.ppm INTERVAL=5` (also the project's "roms" build command) makes a new
+`gen_soc_rom.init`, and the ROMs tab (or `bram-init --rom rom_inst=...`) writes it into the routed design and makes the
+bitstream in seconds. `make test` runs the program under QEMU, with the real rootfs where the flash window is. The LCD
+controller's init and font ROMs (`lcd_init_rom.hex`, `lcd_font.hex`) must be in the project's source directory: without them the
+panel is never initialised and stays blank.
+
 The Xilinx primitive models Verilator reads as cell stubs, and that the
 mapped Verilog simulates against, are `xc7/cells_sim.v` and
 `xc7/cells_xtra.v`: yosys's (ISC licence, kept in their headers), copied in
@@ -294,6 +333,7 @@ Application identity and the hardened runtime, and writes `synthgui-VERSION-maco
 With `NOTARY_PROFILE=name` (made once with `xcrun notarytool store-credentials name`) it notarizes and staples as well.
 The bundle runs from any location, with nothing from Homebrew and no Perl or Python: only the macOS system libraries and
 the basic shell utilities come from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.
+
 
 ## Code signing policy
 

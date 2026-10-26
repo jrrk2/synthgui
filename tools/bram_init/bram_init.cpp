@@ -8,6 +8,10 @@
 //       --split image --line-size N --cell REGEX
 //                                     byte lane NN of every N-byte line of a flat binary to the matching cells
 //       --check                       say which block RAMs differ from the images, write nothing (exit 1 if any)
+//       --meminit M.json              the memories the synthesis made (verilator --map-only-meminit), with --placement
+//       --roms                        list them: name, width x depth, the file they were initialised from, cells placed
+//       --rom NAME[=image]            a whole new image for memory NAME (default: the file it was synthesized from);
+//                                     NAME all: every memory from its own file. Repeatable. Needs --placement.
 //
 // With --out the patched file is written; without, --set and friends only report. compare.sh checks the output
 // against the Python that came first (vortex hw/syn/xilinx/vc707/update_bram_init.py) byte for byte.
@@ -443,10 +447,154 @@ string hex_dump(const Image& img, size_t max_words) {
     return out.str();
 }
 
+// ---- the memories the synthesis made ----
+
+const Memory* Manifest::find(const string& name) const {
+    for (const Memory& m : memories) if (m.name == name) return &m;
+    return nullptr;
+}
+
+static int num(const minijson::JV& o, const char* key, int dflt = 0) {
+    const minijson::JV* v = o.get(key);
+    return v && v->t == minijson::JV::Num ? (int)v->n : dflt;
+}
+static string text(const minijson::JV& o, const char* key) {
+    const minijson::JV* v = o.get(key);
+    return v && v->t == minijson::JV::Str ? v->s : string();
+}
+
+Manifest load_manifest(const string& path) {
+    const minijson::JV doc = minijson::json_file(path);
+    const minijson::JV* mems = doc.get("memories");
+    if (!mems || mems->t != minijson::JV::Arr) die(path + ": no \"memories\" (written by verilator --map-only-meminit)");
+    Manifest man;
+    man.path = path;
+    man.top = text(doc, "top");
+    for (const minijson::JV& e : mems->a) {
+        Memory m;
+        m.name = text(e, "name");
+        m.type = text(e, "type");
+        m.kind = text(e, "kind");
+        m.primitive = text(e, "primitive");
+        m.init_file = text(e, "init_file");
+        m.init_path = text(e, "init_path");
+        m.width = num(e, "width");
+        m.depth = num(e, "depth");
+        m.lane_bits = num(e, "lane_bits");
+        m.lanes = num(e, "lanes");
+        m.blocks = num(e, "blocks");
+        m.words_per_block = num(e, "words_per_block");
+        const minijson::JV* cas = e.get("cascade");
+        m.cascade = cas && cas->t == minijson::JV::Bool && cas->n != 0;
+        const minijson::JV* cells = e.get("cells");
+        if (cells && cells->t == minijson::JV::Arr)
+            for (const minijson::JV& c : cells->a) {
+                MemCell mc;
+                mc.cell = text(c, "cell");
+                mc.lane = num(c, "lane");
+                mc.block = num(c, "block");
+                mc.bit_lo = num(c, "bit_lo");
+                mc.bits = num(c, "bits");
+                mc.word_lo = num(c, "word_lo");
+                m.cells.push_back(std::move(mc));
+            }
+        man.memories.push_back(std::move(m));
+    }
+    return man;
+}
+
+vector<uint64_t> load_words(const string& path, int width, int depth) {
+    const size_t dot = path.rfind('.');
+    string ext = dot == string::npos ? "" : path.substr(dot + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    vector<uint64_t> words;
+    if (ext == "hex" || ext == "mem" || ext == "init" || ext == "txt") {   // $readmemh, as the mapper reads it
+        std::ifstream f(path);
+        if (!f) die("cannot open " + path);
+        size_t addr = 0;
+        string line, tok;
+        while (std::getline(f, line)) {
+            const size_t c = line.find("//");
+            if (c != string::npos) line.erase(c);
+            std::istringstream ss(line);
+            while (ss >> tok) {
+                if (tok[0] == '@') { addr = strtoull(tok.c_str() + 1, nullptr, 16); continue; }
+                uint64_t w = 0;
+                for (const char ch : tok) {
+                    if (ch == '_') continue;
+                    if (!isxdigit((unsigned char)ch)) die(path + ": not a hex word: " + tok);
+                    w = (w << 4) | (uint64_t)(isdigit((unsigned char)ch) ? ch - '0' : tolower(ch) - 'a' + 10);
+                }
+                if (words.size() <= addr) words.resize(addr + 1, 0);
+                words[addr++] = w;
+            }
+        }
+    } else {
+        const vector<uint8_t> bytes = read_bytes(path);
+        const int wb = (width + 7) / 8;
+        for (size_t k = 0; k * wb < bytes.size(); k++) {
+            uint64_t w = 0;
+            for (int i = 0; i < wb && k * wb + i < bytes.size(); i++) w |= (uint64_t)bytes[k * wb + i] << (8 * i);
+            words.push_back(w);
+        }
+    }
+    if ((int)words.size() > depth)
+        die(path + ": " + std::to_string(words.size()) + " words, the memory holds " + std::to_string(depth));
+    const uint64_t mask = width >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << width) - 1);
+    for (size_t k = 0; k < words.size(); k++)
+        if (words[k] & ~mask) {
+            char buf[80];
+            snprintf(buf, sizeof buf, ": word %zu (0x%llx) is wider than %d bits", k, (unsigned long long)words[k], width);
+            die(path + buf);
+        }
+    words.resize(depth, 0);
+    return words;
+}
+
+const Bram* bram_of(const Fasm& f, const MemCell& c) {
+    for (const Bram& b : f.brams) if (b.cell == c.cell) return &b;
+    return nullptr;
+}
+
+Image cell_image(const Memory& m, const MemCell& c, const vector<uint64_t>& words, const Bram& b) {
+    Image img;
+    img.data_bits = b.data_bits();
+    img.parity_bits = b.parity_bits();
+    if (img.data_bits < c.bits)
+        die(c.cell + ": the block RAM is x" + std::to_string(img.data_bits) + " but the memory " + m.name + " puts " +
+            std::to_string(c.bits) + " bits of each word in it");
+    const uint64_t mask = c.bits >= 64 ? ~(uint64_t)0 : (((uint64_t)1 << c.bits) - 1);
+    img.data.assign(b.depth(), 0);
+    for (int k = 0; k < b.depth(); k++) {
+        const size_t w = (size_t)c.word_lo + k;
+        if (w >= words.size() || k >= m.words_per_block) break;
+        img.data[k] = (words[w] >> c.bit_lo) & mask;
+    }
+    if (img.parity_bits) img.parity.assign(b.depth(), 0);
+    return img;
+}
+
+RomResult update_memory(Fasm& f, const Memory& m, const vector<uint64_t>& words, bool apply) {
+    RomResult r;
+    for (const MemCell& c : m.cells) {
+        r.cells++;
+        const Bram* b = bram_of(f, c);
+        if (!b) { if (r.missing.size() < 8) r.missing.push_back(c.cell); continue; }
+        r.placed++;
+        const Image img = cell_image(m, c, words, *b);
+        if (f.same(*b, img)) continue;
+        r.changed++;
+        if (apply) f.write(*b, img);
+    }
+    return r;
+}
+
 // ---- the command line ----
 
 static int tool_main(int argc, char** argv) {
-    string fasm, placement, out_path, cell_re, hexdir, split, dump;
+    string fasm, placement, out_path, cell_re, hexdir, split, dump, meminit;
+    vector<std::pair<string, string>> roms;
+    bool list_roms = false;
     vector<std::pair<string, string>> sets;
     bool list = false, check = false;
     int line_size = 0;
@@ -463,7 +611,13 @@ static int tool_main(int argc, char** argv) {
         else if (a == "--hexdir") hexdir = val();
         else if (a == "--split") split = val();
         else if (a == "--line-size") line_size = atoi(val().c_str());
-        else if (a == "--set") {
+        else if (a == "--meminit") meminit = val();
+        else if (a == "--roms") list_roms = true;
+        else if (a == "--rom") {
+            const string kv = val();
+            const size_t eq = kv.find('=');
+            roms.emplace_back(kv.substr(0, eq), eq == string::npos ? string() : kv.substr(eq + 1));
+        } else if (a == "--set") {
             const string kv = val();
             const size_t eq = kv.find('=');
             if (eq == string::npos) die("--set wants KEY=image");
@@ -521,6 +675,56 @@ static int tool_main(int argc, char** argv) {
             } else wanted.emplace_back(&b, lane_of(flat, lane, line_size, b));
         }
         if (!matched) die("no placed block RAM cell matches " + cell_re);
+    }
+    // whole memories, from the synthesis manifest
+    int rom_cells = 0, rom_changed = 0;
+    if (!meminit.empty() || !roms.empty() || list_roms) {
+        if (meminit.empty()) die("--rom and --roms need --meminit");
+        const Manifest man = load_manifest(meminit);
+        if (list_roms)
+            for (const Memory& m : man.memories) {
+                int placed = 0;
+                for (const MemCell& c : m.cells) placed += bram_of(f, c) != nullptr;
+                toolio::out("%-40s %5d x %-7d %-6s %4d/%-4zu cells  %s\n", m.name.c_str(), m.width, m.depth, m.kind.c_str(), placed,
+                            m.cells.size(), m.init_file.c_str());
+            }
+        vector<std::pair<const Memory*, string>> todo;
+        for (auto& kv : roms) {
+            if (kv.first == "all") {
+                for (const Memory& m : man.memories) if (!m.init_path.empty() && kv.second.empty()) todo.emplace_back(&m, m.init_path);
+                continue;
+            }
+            const Memory* m = man.find(kv.first);
+            if (!m) die("no memory " + kv.first + " in " + meminit);
+            const string img = kv.second.empty() ? m->init_path : kv.second;
+            if (img.empty()) die("memory " + kv.first + " has no $readmemh file: give --rom " + kv.first + "=image");
+            todo.emplace_back(m, img);
+        }
+        for (auto& t : todo) {
+            const vector<uint64_t> words = load_words(t.second, t.first->width, t.first->depth);
+            const RomResult r = update_memory(f, *t.first, words, !check);
+            rom_cells += r.cells;
+            rom_changed += r.changed;
+            toolio::out("%-40s %d cells, %d placed, %d %s  (%s)\n", t.first->name.c_str(), r.cells, r.placed, r.changed,
+                        check ? "differ" : "changed", t.second.c_str());
+            if (r.placed < r.cells) {
+                string miss;
+                for (const string& c : r.missing) miss += " " + c;
+                toolio::err("  %d cells not in the placement:%s\n", r.cells - r.placed, miss.c_str());
+                if (r.placed == 0) die("none of the memory's cells are in the FASM/placement: is --placement the one of this FASM?");
+            }
+        }
+        if (check && !todo.empty()) {
+            toolio::out("%d block RAMs differ from the images\n", rom_changed);
+            if (wanted.empty()) return rom_changed ? 1 : 0;
+        }
+        if (!todo.empty() && wanted.empty() && !check) {
+            if (!out_path.empty()) {
+                f.save(out_path);
+                toolio::out("%s: %d block RAMs changed\n", out_path.c_str(), rom_changed);
+            } else toolio::out("%d block RAMs would change (no --out)\n", rom_changed);
+            return 0;
+        }
     }
     int differ = 0;
     for (auto& w : wanted) {
