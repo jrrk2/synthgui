@@ -287,6 +287,10 @@ With `NOTARY_PROFILE=name` (made once with `xcrun notarytool store-credentials n
 The bundle runs from any location, with nothing from Homebrew and no Perl or Python: only the macOS system libraries and
 the basic shell utilities come from the host. It needs macOS 26 or later because the Homebrew Qt it bundles does.
 
+The **release** workflow (Actions, release, Run workflow, with a tag) builds all three platforms, signs and notarizes the macOS
+app, and drafts one GitHub release with the archives and their SHA-256 sums; the secrets it needs are listed in the header of
+`.github/workflows/release.yml`. Run it on a commit whose **flow** run has finished, as it takes the tools from that run's cache.
+
 ## Code signing policy
 
 Windows releases are built from this repository's source by `.github/workflows/windows-release.yml` on GitHub-hosted
