@@ -77,14 +77,18 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <QFontDatabase>
+#include <QInputDialog>
 #include "options.h"
 #include "tools/common/toolio.hpp"
+#include "tools/bram_init/bram_init.hpp"
 
 // tools/: the converters the pipeline steps run as `synthgui --tool NAME`
 int fasm2frames_main(int argc, char** argv);
 int bit2uf2_main(int argc, char** argv);
 int sta_prep_main(int argc, char** argv);
 int bram_fom_main(int argc, char** argv);
+int bram_init_main(int argc, char** argv);
 
 // ---------------------------------------------------------------- project
 
@@ -987,6 +991,7 @@ int runBuiltinTool(const QString& name, const QStringList& args) {
     else if (name == "bit2uf2") fn = bit2uf2_main;
     else if (name == "sta-prep") fn = sta_prep_main;
     else if (name == "bram-fom") fn = bram_fom_main;
+    else if (name == "bram-init") fn = bram_init_main;
     if (!fn) {
         toolio::err("synthgui: no built-in tool '%s'\n", name.toLocal8Bit().constData());
         return 127;
@@ -1049,6 +1054,359 @@ public:
 };
 
 }  // namespace
+
+// ---------------------------------------------------------------- block RAM contents
+
+// Every block RAM of a routed FASM and what it holds. Pick rows, give them images, save: the memory changes without
+// another place and route (tools/bram_init/). The Bitstream step then makes the new .bit from the saved FASM.
+class BramInitWindow final : public QMainWindow {
+public:
+    explicit BramInitWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
+        setWindowTitle("Block RAM contents");
+        resize(1240, 720);
+        auto* tb = addToolBar("Block RAM");
+        tb->addAction("Open FASM...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "Open a routed FASM", dirOf(m_path), "FASM (*.fasm);;All files (*)");
+            if (!f.isEmpty()) open(f, guessPlacement(f));
+        });
+        tb->addAction("Placement...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "nextpnr placement (-o placement=), to name the cells", dirOf(m_path), "JSON (*.json)");
+            if (!f.isEmpty()) namePlacement(f);
+        });
+        tb->addSeparator();
+        tb->addAction("Assign image...", this, [this] { assignImages(-1); });
+        tb->addAction("Assign lane files...", this, [this] { assignLanes(); });
+        tb->addAction("Split a binary...", this, [this] { splitBinary(); });
+        tb->addAction("Clear", this, [this] { for (int r : selectedRows()) clearRow(r); showDump(); });
+        tb->addSeparator();
+        tb->addAction("Save", this, [this] { save(m_path); });
+        tb->addAction("Save as...", this, [this] {
+            const QString f = QFileDialog::getSaveFileName(this, "Save the patched FASM", m_path, "FASM (*.fasm)");
+            if (!f.isEmpty()) save(f);
+        });
+
+        auto* split = new QSplitter(this);
+        auto* left = new QWidget;
+        auto* lv = new QVBoxLayout(left);
+        lv->setContentsMargins(0, 0, 0, 0);
+        m_filter = new QLineEdit;
+        m_filter->setPlaceholderText("filter by tile or cell name");
+        connect(m_filter, &QLineEdit::textChanged, this, [this] { applyFilter(); });
+        lv->addWidget(m_filter);
+        m_table = new QTableWidget(0, 7);
+        m_table->setHorizontalHeaderLabels({"Tile", "Block", "Width", "Depth", "Cell", "Image", "State"});
+        m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_table->horizontalHeader()->setStretchLastSection(true);
+        m_table->verticalHeader()->setVisible(false);
+        connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] { showDump(); });
+        connect(m_table, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* it) { widthEdited(it); });
+        connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int r, int c) { if (c == 5) assignImages(r); });
+        lv->addWidget(m_table);
+        split->addWidget(left);
+        auto* right = new QWidget;
+        auto* rv = new QVBoxLayout(right);
+        rv->setContentsMargins(0, 0, 0, 0);
+        m_dumpTitle = new QLabel("No block RAM selected");
+        m_dump = new QPlainTextEdit;
+        m_dump->setReadOnly(true);
+        m_dump->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        m_dump->setLineWrapMode(QPlainTextEdit::NoWrap);
+        rv->addWidget(m_dumpTitle);
+        rv->addWidget(m_dump);
+        split->addWidget(right);
+        split->setSizes({860, 380});
+        setCentralWidget(split);
+        statusBar()->showMessage("Open a routed FASM");
+    }
+
+    static QString guessPlacement(const QString& fasm) {   // nextpnr -o placement= beside the FASM, as the projects name it
+        if (!fasm.endsWith(".fasm")) return QString();
+        const QString p = fasm.chopped(5) + "_placement.json";
+        return QFileInfo::exists(p) ? p : QString();
+    }
+
+    void open(const QString& fasm, const QString& placement) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            bram_init::Fasm f;
+            f.load(fasm.toStdString());
+            m_fasm = std::move(f);
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+        m_path = fasm;
+        m_placement.clear();
+        m_rows.assign(m_fasm.brams.size(), Row());
+        setWindowTitle("Block RAM contents - " + QFileInfo(fasm).fileName());
+        if (!placement.isEmpty()) namePlacement(placement);
+        else fill();
+    }
+
+    void namePlacement(const QString& placement) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            m_fasm.name_cells(placement.toStdString());
+            m_placement = placement;
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+        fill();
+    }
+
+    bool save(const QString& path) {
+        if (path.isEmpty()) return false;
+        int changed = 0;
+        try {
+            for (size_t i = 0; i < m_rows.size(); i++) {
+                Row& r = m_rows[i];
+                if (!r.assigned || m_fasm.same(m_fasm.brams[i], r.img)) continue;
+                m_fasm.write(m_fasm.brams[i], r.img);
+                changed++;
+            }
+            m_fasm.save(path.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return false;
+        }
+        m_path = path;
+        for (size_t i = 0; i < m_rows.size(); i++) if (m_rows[i].assigned) setState((int)i);
+        statusBar()->showMessage(QString("%1: %2 block RAM%3 changed; run the Bitstream step for the new .bit")
+                                     .arg(QFileInfo(path).fileName()).arg(changed).arg(changed == 1 ? "" : "s"));
+        return true;
+    }
+
+private:
+    struct Row {
+        QString image;
+        bram_init::Image img;
+        bool assigned = false;
+    };
+    static QString dirOf(const QString& p) { return p.isEmpty() ? QDir::homePath() : QFileInfo(p).absolutePath(); }
+    static QString laneRegex(QWidget* parent, bool* ok) {
+        return QInputDialog::getText(parent, "Lane number", "Regular expression whose first group is the lane number in the cell name:",
+                                     QLineEdit::Normal, "[^0-9]*([0-9]+).*", ok);
+    }
+
+    void fill() {
+        m_table->blockSignals(true);
+        m_table->setRowCount((int)m_fasm.brams.size());
+        int named = 0;
+        for (int i = 0; i < (int)m_fasm.brams.size(); i++) {
+            const bram_init::Bram& b = m_fasm.brams[i];
+            auto cell = [&](int c, const QString& text, bool editable = false) {
+                auto* it = new QTableWidgetItem(text);
+                if (!editable) it->setFlags(it->flags() & ~Qt::ItemIsEditable);
+                m_table->setItem(i, c, it);
+            };
+            cell(0, QString::fromStdString(b.tile));
+            cell(1, b.half < 0 ? "RAMB36E1" : QString("RAMB18_Y%1").arg(b.half), true);
+            cell(2, QString::number(b.port_width), true);
+            cell(3, QString::number(b.depth()));
+            cell(4, QString::fromStdString(b.cell));
+            m_table->item(i, 4)->setToolTip(QString::fromStdString(b.cell));
+            cell(5, m_rows[i].image);
+            cell(6, "");
+            if (!b.cell.empty()) named++;
+            setState(i);
+        }
+        m_table->resizeColumnsToContents();
+        if (m_table->columnWidth(4) > 300) m_table->setColumnWidth(4, 300);   // hierarchical names run long; the tooltip has it all
+        if (m_table->columnWidth(5) < 150) m_table->setColumnWidth(5, 150);
+        m_table->blockSignals(false);
+        applyFilter();
+        statusBar()->showMessage(QString("%1 block RAMs%2").arg(m_fasm.brams.size())
+                                     .arg(m_placement.isEmpty() ? "; Placement... names their cells" : QString(", %1 named").arg(named)));
+    }
+
+    void applyFilter() {
+        const QString t = m_filter->text();
+        for (int r = 0; r < m_table->rowCount(); r++)
+            m_table->setRowHidden(r, !t.isEmpty() && !m_table->item(r, 0)->text().contains(t, Qt::CaseInsensitive) &&
+                                         !m_table->item(r, 4)->text().contains(t, Qt::CaseInsensitive));
+    }
+
+    QList<int> selectedRows() const {
+        QList<int> rows;
+        for (const QModelIndex& ix : m_table->selectionModel()->selectedRows())
+            if (!m_table->isRowHidden(ix.row())) rows.append(ix.row());
+        std::sort(rows.begin(), rows.end());
+        return rows;
+    }
+
+    void setState(int r) {
+        const Row& row = m_rows[r];
+        QString s;
+        if (row.assigned) s = m_fasm.same(m_fasm.brams[r], row.img) ? "same as the FASM" : "will change";
+        m_table->item(r, 5)->setText(row.image);
+        m_table->item(r, 6)->setText(s);
+    }
+
+    void clearRow(int r) {
+        m_rows[r] = Row();
+        setState(r);
+    }
+
+    bool assign(int r, const QString& file, bram_init::Image img) {
+        m_rows[r].image = file;
+        m_rows[r].img = std::move(img);
+        m_rows[r].assigned = true;
+        setState(r);
+        return true;
+    }
+
+    void widthEdited(QTableWidgetItem* it) {
+        const int r = it->row();
+        if (it->column() == 1) {   // the block: "36" makes the tile one RAMB36E1, "18" two RAMB18E1 (a FASM cannot say which)
+            const QString t = it->text().trimmed();
+            const int mode = t.contains("36") ? 36 : t.contains("18") ? 18 : 0;
+            if (mode) m_fasm.set_mode(m_fasm.brams[r].tile, mode);
+            m_rows.assign(m_fasm.brams.size(), Row());
+            fill();
+            return;
+        }
+        if (it->column() != 2) return;
+        bram_init::Bram& b = m_fasm.brams[r];
+        const int w = it->text().toInt();
+        const bool valid = (w == 1 || w == 2 || w == 4 || w == 9 || w == 18 || w == 36 || (w == 72 && b.half < 0));
+        m_table->blockSignals(true);
+        if (!valid) it->setText(QString::number(b.port_width));
+        else if (w != b.port_width) {
+            b.port_width = w;
+            m_table->item(r, 3)->setText(QString::number(b.depth()));
+            if (m_rows[r].assigned) clearRow(r);   // the image was read for the old width
+        }
+        m_table->blockSignals(false);
+        showDump();
+    }
+
+    void assignImages(int row) {
+        QList<int> rows = row >= 0 ? QList<int>{row} : selectedRows();
+        if (rows.isEmpty()) { statusBar()->showMessage("Select the block RAMs first"); return; }
+        QStringList files = QFileDialog::getOpenFileNames(this, rows.size() == 1 ? "Image for the block RAM" : "One image for all, or one per block RAM",
+                                                          dirOf(m_lastImageDir), "Memory images (*.hex *.mem *.bin);;All files (*)");
+        if (files.isEmpty()) return;
+        files.sort();
+        m_lastImageDir = files.first();
+        if (files.size() != 1 && files.size() != rows.size()) {
+            QMessageBox::warning(this, "Block RAM contents", QString("%1 files for %2 block RAMs: choose one file, or one per row").arg(files.size()).arg(rows.size()));
+            return;
+        }
+        int done = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            const QString f = files.size() == 1 ? files.first() : files[i];
+            try {
+                assign(rows[i], f, bram_init::load_image(f.toStdString(), m_fasm.brams[rows[i]]));
+                done++;
+            } catch (const std::exception& e) {
+                QMessageBox::warning(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            }
+        }
+        statusBar()->showMessage(QString("%1 block RAM%2 given an image").arg(done).arg(done == 1 ? "" : "s"));
+        showDump();
+    }
+
+    // lane<NN>.hex from a directory, NN taken from each selected cell's name
+    void assignLanes() {
+        QList<int> rows = selectedRows();
+        if (rows.isEmpty()) for (int r = 0; r < m_table->rowCount(); r++) if (!m_table->isRowHidden(r)) rows.append(r);
+        const QString dir = QFileDialog::getExistingDirectory(this, "Directory of lane<NN>.hex files", dirOf(m_lastImageDir));
+        if (dir.isEmpty()) return;
+        bool ok = false;
+        const QRegularExpression re(laneRegex(this, &ok));
+        if (!ok || !re.isValid()) return;
+        m_lastImageDir = dir + "/x";
+        int done = 0, missing = 0;
+        QStringList errors;
+        for (int r : rows) {
+            const QRegularExpressionMatch m = re.match(QString::fromStdString(m_fasm.brams[r].cell));
+            if (!m.hasMatch() || m.lastCapturedIndex() < 1) continue;
+            const QString f = QString("%1/lane%2.hex").arg(dir).arg(m.captured(1).toInt(), 2, 10, QChar('0'));
+            if (!QFileInfo::exists(f)) { missing++; continue; }
+            try {
+                assign(r, f, bram_init::load_image(f.toStdString(), m_fasm.brams[r]));
+                done++;
+            } catch (const std::exception& e) {
+                errors.append(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!errors.isEmpty()) QMessageBox::warning(this, "Block RAM contents", errors.mid(0, 8).join('\n'));
+        statusBar()->showMessage(QString("%1 lane file%2 assigned, %3 cells without a file").arg(done).arg(done == 1 ? "" : "s").arg(missing));
+        showDump();
+    }
+
+    // byte lane NN of every line of one flat binary to the selected block RAMs
+    void splitBinary() {
+        const QList<int> rows = selectedRows();
+        if (rows.isEmpty()) { statusBar()->showMessage("Select the block RAMs that share the image first"); return; }
+        const QString file = QFileDialog::getOpenFileName(this, "Flat binary image", dirOf(m_lastImageDir), "All files (*)");
+        if (file.isEmpty()) return;
+        bool ok = false;
+        const QRegularExpression re(laneRegex(this, &ok));
+        if (!ok || !re.isValid()) return;
+        const int wordBytes = (m_fasm.brams[rows.first()].data_bits() + 7) / 8;
+        const int lineSize = QInputDialog::getInt(this, "Line size", "Bytes per line of the image (one word per selected block RAM):",
+                                                  rows.size() * wordBytes, wordBytes, 1 << 20, wordBytes, &ok);
+        if (!ok) return;
+        m_lastImageDir = file;
+        std::vector<uint8_t> bytes;
+        try {
+            bytes = bram_init::read_bytes(file.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        int done = 0;
+        QStringList errors;
+        for (int i = 0; i < rows.size(); i++) {
+            const QRegularExpressionMatch m = re.match(QString::fromStdString(m_fasm.brams[rows[i]].cell));
+            const int lane = (m.hasMatch() && m.lastCapturedIndex() >= 1) ? m.captured(1).toInt() : i;
+            try {
+                assign(rows[i], QString("%1 [lane %2]").arg(QFileInfo(file).fileName()).arg(lane),
+                       bram_init::lane_of(bytes, lane, lineSize, m_fasm.brams[rows[i]]));
+                done++;
+            } catch (const std::exception& e) {
+                errors.append(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!errors.isEmpty()) QMessageBox::warning(this, "Block RAM contents", errors.mid(0, 8).join('\n'));
+        statusBar()->showMessage(QString("%1 lane%2 of %3 assigned").arg(done).arg(done == 1 ? "" : "s").arg(QFileInfo(file).fileName()));
+        showDump();
+    }
+
+    void showDump() {
+        const int r = m_table->currentRow();
+        if (r < 0 || r >= (int)m_fasm.brams.size()) {
+            m_dumpTitle->setText("No block RAM selected");
+            m_dump->clear();
+            return;
+        }
+        const bram_init::Bram& b = m_fasm.brams[r];
+        m_dumpTitle->setText(QString("%1  %2  x%3, %4 words%5").arg(QString::fromStdString(b.key()), b.half < 0 ? "RAMB36E1" : "RAMB18E1")
+                                 .arg(b.data_bits()).arg(b.depth()).arg(b.cell.empty() ? QString() : "  " + QString::fromStdString(b.cell)));
+        const size_t shown = 4096;
+        QString text = "In the FASM:\n" + QString::fromStdString(bram_init::hex_dump(m_fasm.read(b), shown));
+        const Row& row = m_rows[r];
+        if (row.assigned)
+            text += "\n" + row.image + (m_fasm.same(b, row.img) ? " (same as the FASM):\n" : " (will replace it):\n") +
+                    QString::fromStdString(bram_init::hex_dump(row.img, shown));
+        m_dump->setPlainText(text);
+    }
+
+    bram_init::Fasm m_fasm;
+    std::vector<Row> m_rows;
+    QString m_path, m_placement, m_lastImageDir;
+    QTableWidget* m_table = nullptr;
+    QLineEdit* m_filter = nullptr;
+    QPlainTextEdit* m_dump = nullptr;
+    QLabel* m_dumpTitle = nullptr;
+};
 
 class MainWindow final : public QMainWindow {
 public:
@@ -1214,6 +1572,17 @@ public:
         tb->addAction("Open project...", this, [this] {
             const QString f = QFileDialog::getOpenFileName(this, "Open project", QFileInfo(m_p.path).absolutePath(), "synthgui project (*.json)");
             if (!f.isEmpty()) openProjectWindow(f);
+        });
+        tb->addAction("Block RAMs...", this, [this] {   // the routed FASM's memories: new contents without a new P&R
+            const QString fasm = m_p.expand("{fasm}");
+            if (!QFileInfo::exists(fasm)) {
+                statusBar()->showMessage("No routed FASM yet: run Place & route first", 8000);
+                return;
+            }
+            auto* w = new BramInitWindow(this);
+            w->setAttribute(Qt::WA_DeleteOnClose);
+            w->open(fasm, BramInitWindow::guessPlacement(fasm));
+            w->show();
         });
 
         if (!m_p.sources.isEmpty()) openFile(m_p.sources.last(), 0);
@@ -1955,7 +2324,8 @@ int main(int argc, char** argv) {
         if (!strcmp(tool, "bit2uf2")) return bit2uf2_main(targc, targv);
         if (!strcmp(tool, "sta-prep")) return sta_prep_main(targc, targv);
         if (!strcmp(tool, "bram-fom")) return bram_fom_main(targc, targv);
-        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom)\n", tool);
+        if (!strcmp(tool, "bram-init")) return bram_init_main(targc, targv);
+        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom, bram-init)\n", tool);
         return 2;
     }
     QApplication app(argc, argv);
@@ -1976,6 +2346,8 @@ int main(int argc, char** argv) {
                                 "project (repeatable; keys as in the project's \"options\")", "key=value"});
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
     cl.addOption({"work", "use this work directory instead of the project's own", "dir"});
+    cl.addOption({"bram-init", "open the block RAM contents window on this routed FASM, no project needed", "fasm"});
+    cl.addOption({"placement", "nextpnr placement JSON for --bram-init (names the cells); default <fasm>_placement.json", "json"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
     QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog, set its UF2 checkbox on or off (keep: leave it), "
                                        "--screenshot it, accept it and print what is stored", "on|off|keep");
@@ -1994,6 +2366,14 @@ int main(int argc, char** argv) {
         d.save();
         std::printf("uf2/writeOnRunAll=%d\n", writeNonVolatileOnRunAll() ? 1 : 0);
         return 0;
+    }
+    if (cl.isSet("bram-init")) {   // the block RAM contents window on its own
+        BramInitWindow w;
+        const QString fasm = cl.value("bram-init");
+        w.open(fasm, cl.isSet("placement") ? cl.value("placement") : BramInitWindow::guessPlacement(fasm));
+        w.show();
+        if (cl.isSet("screenshot")) QTimer::singleShot(500, [&] { w.grab().save(cl.value("screenshot")); app.quit(); });
+        return app.exec();
     }
     Project p;
     QString err;

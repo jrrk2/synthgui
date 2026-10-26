@@ -177,10 +177,18 @@ stay separate executables, started as processes.
 | `bit2uf2` (`tools/bit2uf2/`) | wraps a bitstream in UF2 blocks for the Sonata board's SONATA drive | `xc7/bit2uf2.py` |
 | `sta-prep` (`tools/sta_prep/`) | nextpnr's routed JSON and SDF to a Liberty file, a Verilog netlist and the Tcl `sta` reads | `sta/nextpnr_sta.py` |
 | `bram-fom` (`tools/bram_fom/`) | the block RAM figure of merit | `deps/nextpnr/.github/scripts/bram_fom.py` |
+| `bram-init` (`tools/bram_init/`) | new block RAM contents in a routed FASM, so a memory image changes without another place and route | vortex `hw/syn/xilinx/vc707/update_bram_init.py` |
 
 Each is also a command, `build/synthgui --tool NAME args`, for scripts and for the checks: `tools/*/compare.sh` runs the
 Python original and the tool on the same inputs and compares the outputs byte for byte (every FASM, netlist and placement
 in `~/synthgui-work` gave identical results, on Artix-7 and Virtex-7). The Python files stay in the tree as the reference.
+
+**Block RAMs...** in the toolbar (or `synthgui --bram-init routed.fasm`, no project needed) lists every block RAM of the
+routed FASM with its tile, width, depth and, from the `_placement.json` beside it, the cell it holds, and shows the
+selected one's contents as a hex dump. Pick rows and give them images (`.hex`/`.mem` as `$readmemh`, anything else raw
+words; `lane<NN>.hex` files by a number in the cell name; or one flat binary split into byte lanes), then Save and run the
+Bitstream step: the new `.bit` is seconds away, the placement and routing untouched. A FASM cannot tell an x36 RAMB36E1
+from two x18 RAMB18E1 in one tile; the placement settles it, and the Block cell can be edited to `36` or `18` when there is none.
 
 The Xilinx primitive models Verilator reads as cell stubs, and that the
 mapped Verilog simulates against, are `xc7/cells_sim.v` and
