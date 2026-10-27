@@ -30,6 +30,11 @@
     "{root}/projects/cdc6000-src/cdc_pkg.sv",
     "{root}/projects/cdc6000-src/cdc6000_core.sv",
     "{root}/projects/sonata_cdc6000-src/sonata_cdc_top.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_text.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_fb_ram.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_font.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_init_rom.v",
+    "{root}/projects/sonata_cdc6000-src/cdc_lcd.v",
     "{root}/projects/cdc6000-src/simpleuart.v"
   ],
   "srcdir": "{root}/projects/sonata_cdc6000-src",
@@ -106,5 +111,14 @@
     "pnr.cong_spread": "1",
     "pnr.tmg_ripup": "1"
   },
-  "family": "artix7"
+  "family": "artix7",
+  "program": "{srcdir}/gfx/lcd.pas",
+  "roms": {
+    "core.mem_inst": {
+      "image": "{srcdir}/mem.hex",
+      "build": "make -s -C {srcdir}/gfx PROGRAM={program} OUT={work}/gfx",
+      "dir": "{srcdir}/gfx",
+      "output": "{work}/gfx/mem.hex"
+    }
+  }
 }

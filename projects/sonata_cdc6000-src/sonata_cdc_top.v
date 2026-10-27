@@ -1,7 +1,8 @@
 // Sonata (xc7a50t) top level for the CDC 6000 core (cdc6000-src/cdc6000_core.sv) running the 1972 Pascal compiler:
 // vc707_cdc_top.v with the board's 25 MHz clock turned by an MMCM into 12.5 MHz (the core does not meet 25 MHz here),
 // its reset button and pins, and 32K words of memory (MEM_AW 15) in place of 128K. The compiler touches at most 19134 words compiling itself (cdcemu, counted
-// on the self-compile), and mem.hex here has the stack limit (word 3) lowered to 077400B to match.
+// on the self-compile), and mem.hex here has the stack limit (word 3) lowered to 077400B to match. The words of a binary
+// file called LCD go to the panel (cdc_lcd.v) instead of the UART.
 //
 //
 // The memory is initialised from mem.hex (runtime + program, see mkmem.py).  The core's five I/O words become a
@@ -24,7 +25,13 @@ module sonata_cdc_top #(
     input        nrst,
     input        serial_rx,
     output       serial_tx,
-    output [7:0] usrLed
+    output [7:0] usrLed,
+    output       lcd_rst,
+    output       lcd_dc,
+    output       lcd_copi,
+    output       lcd_clk,
+    output       lcd_cs,
+    output       lcd_backlight
 );
   wire [7:0] leds;
   assign usrLed = leds;
@@ -83,6 +90,16 @@ module sonata_cdc_top #(
       .dev_req(), .dev_we(), .dev_off(), .dev_wdata(), .dev_ack(1'b0), .dev_rdata(60'd0),
       .halted(halted), .fault(fault), .dbg_pc(dbg_pc), .icount(icount)
   );
+
+  // ---------------------------------------------------------------- LCD: the words of a binary file called LCD (cdc_lcd.v)
+  wire lcd_hit, lcd_busy;
+  cdc_lcd #(.CLK_HZ(CLK_HZ)) lcd (
+      .clk(clk), .rst(rst),
+      .fo_valid(fo_valid), .fo_name(fo_name), .fo_word(fo_word), .hit(lcd_hit), .busy(lcd_busy),
+      .lcd_rst(lcd_rst), .lcd_dc(lcd_dc), .lcd_copi(lcd_copi), .lcd_clk(lcd_clk), .lcd_cs(lcd_cs),
+      .lcd_backlight(lcd_backlight)
+  );
+  wire fo_uart = fo_valid && !lcd_hit;     // every other file goes to the host
 
   // ---------------------------------------------------------------- UART
   reg [2:0] rxs = 3'b111;
@@ -149,9 +166,9 @@ module sonata_cdc_top #(
   reg         ready_sent = 1'b0, report_sent = 1'b0;
   reg [63:0]  cycles = 64'd0;
   wire        idle = (scnt == 5'd0);
-  assign      credit_start = idle && !fo_valid && credit_req && !tx_valid;
-  wire        ready_start  = idle && !fo_valid && !credit_req && !ready_sent && !rst;
-  wire        report_start = idle && !fo_valid && !credit_req && ready_sent && halted && !report_sent;
+  assign      credit_start = idle && !fo_uart && credit_req && !tx_valid;
+  wire        ready_start  = idle && !fo_uart && !credit_req && !ready_sent && !rst;
+  wire        report_start = idle && !fo_uart && !credit_req && ready_sent && halted && !report_sent;
 
   reg [7:0]  txf [0:2047];
   reg [11:0] tx_wp = 12'd0, tx_rp = 12'd0;
@@ -161,8 +178,8 @@ module sonata_cdc_top #(
   reg         push;
   reg [7:0]   pushd;
 
-  assign tx_ready = idle && !fo_valid && !tx_full && ready_sent;
-  assign fo_ready = idle && !fo_valid && !credit_req && ready_sent;
+  assign tx_ready = idle && !fo_uart && !tx_full && ready_sent;
+  assign fo_ready = idle && !fo_uart && !credit_req && ready_sent && !lcd_busy;
 
   always @(*) begin
     push = 1'b0; pushd = 8'd0;
@@ -176,7 +193,7 @@ module sonata_cdc_top #(
     end else begin
       if (!halted) cycles <= cycles + 64'd1;
       if (push) begin txf[tx_wp[10:0]] <= pushd; tx_wp <= tx_wp + 12'd1; end
-      if (fo_valid) begin
+      if (fo_uart) begin
         sbuf <= {8'h81, 4'd0, fo_name, 4'd0, fo_word, 8'd0}; scnt <= 5'd17;
       end else if (credit_start) begin
         sbuf <= {8'h83, 136'd0}; scnt <= 5'd1;
