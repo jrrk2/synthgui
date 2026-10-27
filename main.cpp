@@ -1062,36 +1062,66 @@ QSettings appSettings() {
     const QString file = qEnvironmentVariable("SYNTHGUI_SETTINGS");
     return file.isEmpty() ? QSettings() : QSettings(file, QSettings::IniFormat);
 }
-// Run all (and --run all) write non-volatile memory only when this is on; it is off until somebody turns it on
-bool writeNonVolatileOnRunAll() { return appSettings().value("uf2/writeOnRunAll", false).toBool(); }
-void setWriteNonVolatileOnRunAll(bool on) { appSettings().setValue("uf2/writeOnRunAll", on); }
+// Flow: which steps Run all (and --run all) calls, by step id, for every project. A step with no box ticked or cleared yet is
+// on, except a non-volatile one (a UF2 copied to the board's USB drive, which writes its flash): that one follows uf2/writeOnRunAll,
+// the setting this replaces, which is read but no longer written, and is off until somebody turns it on.
+bool runAllStep(const QString& id, bool nonvolatile) {
+    QSettings s = appSettings();
+    const QString k = "flow/runAll/" + id;
+    if (s.contains(k)) return s.value(k).toBool();
+    return nonvolatile ? s.value("uf2/writeOnRunAll", false).toBool() : true;
+}
+void setRunAllStep(const QString& id, bool on) { appSettings().setValue("flow/runAll/" + id, on); }
 
 class SettingsDialog final : public QDialog {
 public:
-    explicit SettingsDialog(QWidget* parent = nullptr) : QDialog(parent) {
+    // steps: those of the project the dialog was opened from (the choice is per step id and holds for every project); none: the usual ones
+    explicit SettingsDialog(QList<Step> steps = {}, QWidget* parent = nullptr) : QDialog(parent), m_steps(std::move(steps)) {
         setWindowTitle("Settings");
+        if (m_steps.isEmpty())
+            for (const char* id : {"synth", "pnr", "fom", "sta", "lvs", "bit", "uf2", "program", "program_uf2"}) {
+                Step st;
+                st.id = id;
+                st.label = id;
+                st.nonvolatile = st.id == "program_uf2";
+                m_steps << st;
+            }
         auto* v = new QVBoxLayout(this);
-        auto* box = new QGroupBox("UF2 targets (non-volatile)");
+        auto* tabs = new QTabWidget;
+        auto* flow = new QWidget;
+        auto* fl = new QVBoxLayout(flow);
+        auto* box = new QGroupBox("Tools Run all calls");
         auto* bl = new QVBoxLayout(box);
-        write = new QCheckBox("Write the UF2 to the board when Run all is pressed");
-        write->setChecked(writeNonVolatileOnRunAll());
+        for (const Step& st : m_steps) {
+            auto* c = new QCheckBox(st.nonvolatile ? st.label + "  (writes the board's non-volatile memory)" : st.label);
+            c->setToolTip("step " + st.id);
+            c->setChecked(runAllStep(st.id, st.nonvolatile));
+            m_boxes[st.id] = c;
+            bl->addWidget(c);
+        }
+        fl->addWidget(box);
         auto* note = new QLabel(
-            "Off by default. A UF2 target copies the bitstream to the board's USB drive (the Sonata's SONATA drive), "
-            "where the board's own firmware writes it to non-volatile flash, so it is what the board boots from after a "
-            "power cycle.\n\nWith this off, Run all leaves those steps out and says so; their own buttons in the toolbar "
-            "always work. The JTAG Program step loads the FPGA's volatile configuration and is not affected.");
+            "Run all (the toolbar button, and --run all) calls the ticked steps, in the flow's order, and says which it left out. "
+            "A step's own button in the toolbar always runs it, ticked or not.\n\nThe choice is kept by step name for every project. "
+            "A UF2 step copies the bitstream to the board's USB drive (the Sonata's SONATA drive), where the board's own firmware "
+            "writes it to non-volatile flash, so it is what the board boots from after a power cycle: it is off until ticked. "
+            "The JTAG Program step loads the FPGA's volatile configuration.");
         note->setWordWrap(true);
-        bl->addWidget(write);
-        bl->addWidget(note);
-        v->addWidget(box);
+        fl->addWidget(note);
+        fl->addStretch(1);
+        tabs->addTab(flow, "Flow");
+        v->addWidget(tabs);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, this, [this] { save(); accept(); });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         v->addWidget(buttons);
         setMinimumWidth(480);
     }
-    void save() { setWriteNonVolatileOnRunAll(write->isChecked()); }
-    QCheckBox* write = nullptr;
+    void save() {
+        for (auto it = m_boxes.cbegin(); it != m_boxes.cend(); ++it) setRunAllStep(it.key(), it.value()->isChecked());
+    }
+    QList<Step> m_steps;
+    QMap<QString, QCheckBox*> m_boxes;   // by step id
 };
 
 }  // namespace
@@ -1929,7 +1959,7 @@ public:
         auto* prefs = new QAction("Settings...", this);
         prefs->setMenuRole(QAction::PreferencesRole);
         prefs->setShortcut(QKeySequence::Preferences);
-        connect(prefs, &QAction::triggered, this, [this] { SettingsDialog(this).exec(); });
+        connect(prefs, &QAction::triggered, this, [this] { SettingsDialog(m_p.steps, this).exec(); });
         menuBar()->addMenu("&File")->addAction(prefs);
 
         // pipeline
@@ -1946,7 +1976,7 @@ public:
             QStringList left;
             const QList<Step> steps = runAllSteps(&left);
             if (!left.isEmpty())
-                statusBar()->showMessage("Run all leaves out " + left.join(", ") + " (writes non-volatile memory; Settings... turns it on)", 12000);
+                statusBar()->showMessage("Run all leaves out " + left.join(", ") + " (Settings... > Flow ticks the tools it calls)", 12000);
             runSteps(steps);
         });
         tb->addAction("Stop", this, [this] { stop(); });
@@ -2017,12 +2047,11 @@ protected:
     }
 
 public:
-    // the steps of Run all: every step, except non-volatile ones unless Settings has them on (left gets the labels of those)
+    // the steps of Run all: those Settings > Flow ticks (left gets the labels of the others)
     QList<Step> runAllSteps(QStringList* left = nullptr) const {
-        const bool nv = writeNonVolatileOnRunAll();
         QList<Step> r;
         for (const Step& s : m_p.steps) {
-            if (s.nonvolatile && !nv) { if (left) *left << s.label; continue; }
+            if (!runAllStep(s.id, s.nonvolatile)) { if (left) *left << s.label; continue; }
             r << s;
         }
         return r;
@@ -2035,7 +2064,7 @@ public:
         for (const Step& s : m_p.steps)
             if (ids.contains(s.id) || (ids.contains("all") && all.contains(s))) steps << s;
         if (ids.contains("all") && !left.isEmpty())
-            fprintf(stderr, "synthgui: --run all leaves out %s (writes non-volatile memory; Settings turns it on, or name the step)\n",
+            fprintf(stderr, "synthgui: --run all leaves out %s (Settings > Flow ticks the tools it calls, or name the step)\n",
                     qPrintable(left.join(", ")));
         m_done = std::move(done);
         runSteps(steps);
@@ -2742,8 +2771,8 @@ int main(int argc, char** argv) {
     cl.addOption({"placement", "nextpnr placement JSON for --bram-init (names the cells); default <fasm>_placement.json", "json"});
     cl.addOption({"meminit", "ROM manifest for --bram-init (verilator --map-only-meminit); default *_meminit.json beside the FASM", "json"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
-    QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog, set its UF2 checkbox on or off (keep: leave it), "
-                                       "--screenshot it, accept it and print what is stored", "on|off|keep");
+    QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog on the --project's steps (the usual ones without it), set Flow tick "
+                                       "boxes (id=on|off,id=off...; keep: leave them), --screenshot it, accept it and print what is stored", "boxes|keep");
     selftestSettings.setFlags(QCommandLineOption::HiddenFromHelp);
     cl.addOption(selftestSettings);
     QCommandLineOption selftestRom("selftest-rom", "with --bram-init: ROM,image,out.fasm[,build,output]: set the ROM's image (or build command and "
@@ -2756,12 +2785,25 @@ int main(int argc, char** argv) {
     cl.process(app);
     if (cl.isSet("work")) Project::workOverride = QDir(cl.value("work")).absoluteFilePath(".");
     if (cl.isSet("selftest-settings")) {  // drive the Settings dialog without a user
-        SettingsDialog d;
+        QList<Step> steps;
+        if (cl.isSet("project")) {
+            Project p;
+            QString err;
+            if (p.load(cl.value("project"), err)) steps = p.steps;
+            else std::fprintf(stderr, "synthgui: %s\n", qPrintable(err));
+        }
+        SettingsDialog d(steps);
         const QString v = cl.value("selftest-settings");
-        if (v == "on" || v == "off") d.write->setChecked(v == "on");
+        if (v != "keep")
+            for (const QString& kv : v.split(',', Qt::SkipEmptyParts)) {
+                const QStringList p = kv.split('=');
+                if (d.m_boxes.contains(p.value(0))) d.m_boxes[p.value(0)]->setChecked(p.value(1) == "on");
+                else std::fprintf(stderr, "synthgui: the Flow tab has no step %s\n", qPrintable(p.value(0)));
+            }
         if (cl.isSet("screenshot")) { d.show(); app.processEvents(); d.grab().save(cl.value("screenshot")); }
         d.save();
-        std::printf("uf2/writeOnRunAll=%d\n", writeNonVolatileOnRunAll() ? 1 : 0);
+        for (const Step& st : d.m_steps)
+            std::printf("flow/runAll/%s=%d\n", qPrintable(st.id), runAllStep(st.id, st.nonvolatile) ? 1 : 0);
         return 0;
     }
     if (cl.isSet("bram-init")) {   // the block RAM contents window on its own
