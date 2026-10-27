@@ -6,7 +6,7 @@ not the scoreboarded `cdc6000_sb.sv`) on the Sonata's xc7a50t, running the 1972 
 | here | change from the VC707 build |
 |---|---|
 | `sonata_cdc_top.v` | `vc707_cdc_top.v` with the 25 MHz board clock (no IBUFDS) turned into 12.5 MHz by an MMCM (`CLK_KHZ`, 12500; the UART divisor follows it), `nrst` as the reset button, Sonata pins, and `MEM_AW(15)`: 32K words instead of 128K |
-| `mem.hex` | `../cdc6000-src/mem.hex` with the stack limit (word 3) lowered from 0x1FF00 to 0x7F00, so an overflow is reported instead of wrapping in the smaller memory |
+| `mem.hex` | `../cdc6000-src/mem.hex` with the stack limit (word 3) lowered from 0x1FF00 to 0x7F00, so an overflow is reported instead of wrapping in the smaller memory, and the run time of `mkrt.py --go` (see "Compile and run on the board"); `make -C gfx go` rebuilds it |
 | `cdc_lcd.v`, `lcd_font.hex`, `lcd_init_rom.hex` | the LCD (see below); the panel controller is `../sonata_romlinux-src/rtl/lcd_text.v` and its frame buffer, unchanged |
 | `gfx/` | Pascal programs for the LCD, and the Makefile that turns one into the core's memory |
 | `top.xdc` | clock P15, reset T5, UART C17 (tx) / D18 (rx) as `sonata_romlinux` and `sonata_telegraph` use them, user LEDs |
@@ -94,3 +94,25 @@ then the project's `bit` step, gives the bitstream in a second. Shown on the Son
 the picture, as the emulator draws it, and then it stays.
 
 The program must not write to OUTPUT: the host is not there to read the UART, and when its FIFO (2 040 characters) is full the core waits.
+
+## Compile and run on the board
+
+The board takes Pascal source over the UART, compiles it and runs the program, with no host tool in between. `mem.hex` holds the
+compiler and a run time built with `host/mkrt.py --go` (cdc6000 repository, commit "mkrt.py --go: compile and go"):
+
+* the compiler's output, the file `PASCLGO`, is not sent to the host but kept in memory from word 24576 up (`PUTB`);
+* when the compiler returns (the `HALT` vector), the run time checks that the compile finished cleanly (`PARMLIST.ERRFLAG` is 0 and
+  the staged words are the code plus the 50 words of jump table), clears the memory below the staged words, copies the code to
+  `LOADPT` and the jump table to `LPJMPTAB`, clears the staged words, sets `B5 = B6 = LIMCODE + 8`, `B4` = the stack limit
+  (32512), `X7 = 100B`, and jumps to `ENTRYPT`: what the core's boot block does for a program in `mem.hex`;
+* the program's own stop, a run time error, or a compile with errors, stops the machine (a compile with errors shows its listing and
+  does not start); a program that does not fit between its code and word 24576 + 7 936 words says `PROGRAM TOO LARGE`.
+
+On the board, with `cdcrun.py` (the listing comes back over the UART, then the program runs):
+
+    python3 ../cdc6000-src/cdcrun.py gfx/julia.pas --port /dev/cu.usbserial-LN318392 --bit sonata_cdc_top.bit --loader ...
+
+`gfx/lcd.pas` takes 14 833 214 instructions from source to the last pixel (31.8 M cycles, 2.5 s at 12.5 MHz), `gfx/julia.pas`
+15 632 157 (2.6 s): the instruction counts are the emulator's (`make -C gfx gopreview PROGRAM=julia.pas`). Both were compiled and
+run on the Sonata after a power cycle, the second one to show that what the panel drew was not left from the first.
+Without a host the program must not write to OUTPUT beyond the 2 040 characters the UART's FIFO takes, as before.
