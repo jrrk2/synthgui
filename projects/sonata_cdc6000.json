@@ -2,6 +2,7 @@
   "blackboxes": [
     "BUFG",
     "IBUF",
+    "MMCME2_ADV",
     "OBUF",
     "RAMB36E1"
   ],

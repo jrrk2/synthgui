@@ -1,6 +1,6 @@
 // Sonata (xc7a50t) top level for the CDC 6000 core (cdc6000-src/cdc6000_core.sv) running the 1972 Pascal compiler:
-// vc707_cdc_top.v with the board's 25 MHz clock used directly (no MMCM), its reset button and pins, and 32K words of
-// memory (MEM_AW 15) in place of 128K. The compiler touches at most 19134 words compiling itself (cdcemu, counted
+// vc707_cdc_top.v with the board's 25 MHz clock turned by an MMCM into 12.5 MHz (the core does not meet 25 MHz here),
+// its reset button and pins, and 32K words of memory (MEM_AW 15) in place of 128K. The compiler touches at most 19134 words compiling itself (cdcemu, counted
 // on the self-compile), and mem.hex here has the stack limit (word 3) lowered to 077400B to match.
 //
 //
@@ -17,7 +17,7 @@
 // CPU_RESET restarts the core but not the memory (the program has modified it): reprogram the FPGA to run again.
 
 module sonata_cdc_top #(
-    parameter CLK_MHZ = 25,
+    parameter CLK_KHZ = 12500,
     parameter BAUD    = 921600
 ) (
     input        mainClk,
@@ -29,12 +29,29 @@ module sonata_cdc_top #(
   wire [7:0] leds;
   assign usrLed = leds;
   wire cpu_reset = !nrst;
-  localparam CLK_HZ = CLK_MHZ * 1000000;
+  localparam CLK_HZ = CLK_KHZ * 1000;
 
   // ---------------------------------------------------------------- clocking
-  wire clk;
-  wire locked = 1'b1;   // no MMCM: the 25 MHz board clock is used as it is
-  BUFG clk_buf (.I(mainClk), .O(clk));
+  // 25 MHz board clock x 24 = 600 MHz VCO, divided down to CLK_KHZ (12.5 MHz: the core does not meet 25 MHz on the -1 Artix-7)
+  wire mmcm_fb, clk_mmcm, locked, clk;
+  MMCME2_ADV #(
+      .BANDWIDTH       ("OPTIMIZED"),
+      .CLKFBOUT_MULT_F (24),
+      .CLKIN1_PERIOD   (40.0),
+      .CLKOUT0_DIVIDE_F(600000.0 / CLK_KHZ),
+      .CLKOUT0_PHASE   (0),
+      .DIVCLK_DIVIDE   (1),
+      .REF_JITTER1     (0.01)
+  ) mmcm (
+      .CLKFBIN (mmcm_fb),
+      .CLKIN1  (mainClk),
+      .PWRDWN  (1'b0),
+      .RST     (1'b0),
+      .CLKFBOUT(mmcm_fb),
+      .CLKOUT0 (clk_mmcm),
+      .LOCKED  (locked)
+  );
+  BUFG clk_buf (.I(clk_mmcm), .O(clk));
 
   // reset held until the MMCM has been locked for 2^16 cycles
   reg [1:0] locked_sync = 2'b00;

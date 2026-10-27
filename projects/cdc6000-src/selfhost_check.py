@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""selfhost_check.py MEM_HEX BOARD_DIR EMU_DIR RUNTIME_IMG PARMLIST NEXT_IMG
+"""selfhost_check.py MEM_HEX BOARD_DIR EMU_DIR RUNTIME_IMG PARMLIST NEXT_IMG [OCTAL_WORD ...]
 
 The checks after the board has compiled the compiler (make selfhost):
 
@@ -10,7 +10,11 @@ The checks after the board has compiled the compiler (make selfhost):
     from its memory) is word for word the compiler the board ran -- the
     self-hosting fixed point.
 
-Exit 0 when both hold."""
+Exit 0 when both hold.
+
+The optional OCTAL_WORDs are addresses where the two compilers differ on purpose, and are left out of the comparison:
+the Sonata build has the stack limit (word 3) lowered to fit its 32K words of memory, which the compiler built from
+the board's output sets back to the default."""
 import sys
 
 
@@ -39,6 +43,7 @@ def load_hex(path):
 
 def main():
     mem_hex, board, emu, runtime, parmlist, next_img = sys.argv[1:7]
+    skip = {int(a, 8) for a in sys.argv[7:]}
     ok = True
     for f in ("pasclgo.out", "pmdfile.out"):
         same = open("%s/%s" % (board, f)).read() == open("%s/%s" % (emu, f)).read()
@@ -48,7 +53,7 @@ def main():
     rt = load_img(runtime)
     ran = {a: w for a, w in load_hex(mem_hex).items() if a not in rt}
     built = load_img(next_img)
-    diff = [a for a in set(ran) | set(built) if ran.get(a) != built.get(a)]
+    diff = [a for a in set(ran) | set(built) if a not in skip and ran.get(a) != built.get(a)]
     print("compiler built from the board's output: %d words, %d differing from the compiler the board ran"
           % (len(built), len(diff)))
     ok &= not diff
