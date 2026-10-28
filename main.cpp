@@ -77,14 +77,18 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <QFontDatabase>
+#include <QInputDialog>
 #include "options.h"
 #include "tools/common/toolio.hpp"
+#include "tools/bram_init/bram_init.hpp"
 
 // tools/: the converters the pipeline steps run as `synthgui --tool NAME`
 int fasm2frames_main(int argc, char** argv);
 int bit2uf2_main(int argc, char** argv);
 int sta_prep_main(int argc, char** argv);
 int bram_fom_main(int argc, char** argv);
+int bram_init_main(int argc, char** argv);
 
 // ---------------------------------------------------------------- project
 
@@ -99,8 +103,19 @@ struct Step {
     bool nonvolatile = false;
     bool operator==(const Step& o) const { return id == o.id; }
 };
+// How a ROM (a memory the synthesis put in block RAMs, see the ROMs tab of the Block RAMs window) gets its contents after place
+// and route: the image to use in place of the file it was synthesized from, and optionally the command that builds that image
+// from source ({srcdir}, {work}, {root}... as in a step, plus {rom} and {image}).
+struct RomSetup {
+    QString image;    // overrides the $readmemh file; empty: the synthesized one
+    QString build;    // shell command, empty: none
+    QString dir;      // where the command runs; empty: the project's directory
+    QString output;   // what the command writes (becomes the image)
+    bool isEmpty() const { return image.isEmpty() && build.isEmpty() && dir.isEmpty() && output.isEmpty(); }
+};
 struct Project {
     QString path, dir, name, top, work, device, part, xdc;
+    QMap<QString, RomSetup> roms;  // by memory name
     QStringList sources, incdirs, defines, blackboxes;
     QMap<QString, QString> vars;  // every string field, for templates
     QList<Step> steps;
@@ -185,6 +200,12 @@ struct Project {
         for (auto it = options.begin(); it != options.end(); ++it) anyPnr |= it.key().startsWith("pnr.");
         if (!anyPnr) parseOptionArgs("pnr", o.value("nextpnr_flags").toString(), options);
         applyOptions();
+        const QJsonObject rs = o.value("roms").toObject();
+        for (auto it = rs.begin(); it != rs.end(); ++it) {
+            const QJsonObject r = it.value().toObject();
+            roms[it.key()] = RomSetup{r.value("image").toString(), r.value("build").toString(), r.value("dir").toString(),
+                                      r.value("output").toString()};
+        }
         const QJsonObject cap = o.value("capacity").toObject();
         for (auto it = cap.begin(); it != cap.end(); ++it) capacity[it.key()] = it.value().toInt();
         vars["root"] = repoRoot();
@@ -198,6 +219,7 @@ struct Project {
         vars["placement"] = work + "/" + top + "_placement.json";
         vars["bit"] = work + "/" + top + ".bit";
         vars["routed"] = work + "/" + top + "_routed.json";
+        vars["meminit"] = work + "/" + top + "_meminit.json";   // verilator --map-only-meminit: the ROMs the synthesis made
         vars["sdf"] = work + "/" + top + ".sdf";
         vars["xdc"] = xdc;
         // the tools built into this program (tools/) are run in-process: a step's command names one as @name
@@ -241,6 +263,29 @@ struct Project {
         for (auto it = options.begin(); it != options.end(); ++it) oo[it.key()] = it.value();
         o["options"] = oo;
         o["nextpnr_flags"] = optionArgs("pnr", options);  // for anything that reads the flags directly
+        QSaveFile out(path);
+        if (!out.open(QIODevice::WriteOnly)) { err = "cannot write " + path; return false; }
+        out.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
+        if (!out.commit()) { err = "cannot write " + path; return false; }
+        return true;
+    }
+    // Write the ROM setups back into the project file, leaving the rest of it as it is
+    bool saveRoms(QString& err) const {
+        QFile in(path);
+        if (!in.open(QIODevice::ReadOnly)) { err = "cannot read " + path; return false; }
+        QJsonObject o = QJsonDocument::fromJson(in.readAll()).object();
+        in.close();
+        QJsonObject rs;
+        for (auto it = roms.begin(); it != roms.end(); ++it) {
+            if (it.value().isEmpty()) continue;
+            QJsonObject r;
+            if (!it.value().image.isEmpty()) r["image"] = it.value().image;
+            if (!it.value().build.isEmpty()) r["build"] = it.value().build;
+            if (!it.value().dir.isEmpty()) r["dir"] = it.value().dir;
+            if (!it.value().output.isEmpty()) r["output"] = it.value().output;
+            rs[it.key()] = r;
+        }
+        if (rs.isEmpty()) o.remove("roms"); else o["roms"] = rs;
         QSaveFile out(path);
         if (!out.open(QIODevice::WriteOnly)) { err = "cannot write " + path; return false; }
         out.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
@@ -987,6 +1032,7 @@ int runBuiltinTool(const QString& name, const QStringList& args) {
     else if (name == "bit2uf2") fn = bit2uf2_main;
     else if (name == "sta-prep") fn = sta_prep_main;
     else if (name == "bram-fom") fn = bram_fom_main;
+    else if (name == "bram-init") fn = bram_init_main;
     if (!fn) {
         toolio::err("synthgui: no built-in tool '%s'\n", name.toLocal8Bit().constData());
         return 127;
@@ -1016,39 +1062,768 @@ QSettings appSettings() {
     const QString file = qEnvironmentVariable("SYNTHGUI_SETTINGS");
     return file.isEmpty() ? QSettings() : QSettings(file, QSettings::IniFormat);
 }
-// Run all (and --run all) write non-volatile memory only when this is on; it is off until somebody turns it on
-bool writeNonVolatileOnRunAll() { return appSettings().value("uf2/writeOnRunAll", false).toBool(); }
-void setWriteNonVolatileOnRunAll(bool on) { appSettings().setValue("uf2/writeOnRunAll", on); }
+// Flow: which steps Run all (and --run all) calls, by step id, for every project. A step with no box ticked or cleared yet is
+// on, except a non-volatile one (a UF2 copied to the board's USB drive, which writes its flash): that one follows uf2/writeOnRunAll,
+// the setting this replaces, which is read but no longer written, and is off until somebody turns it on.
+bool runAllStep(const QString& id, bool nonvolatile) {
+    QSettings s = appSettings();
+    const QString k = "flow/runAll/" + id;
+    if (s.contains(k)) return s.value(k).toBool();
+    return nonvolatile ? s.value("uf2/writeOnRunAll", false).toBool() : true;
+}
+void setRunAllStep(const QString& id, bool on) { appSettings().setValue("flow/runAll/" + id, on); }
 
 class SettingsDialog final : public QDialog {
 public:
-    explicit SettingsDialog(QWidget* parent = nullptr) : QDialog(parent) {
+    // steps: those of the project the dialog was opened from (the choice is per step id and holds for every project); none: the usual ones
+    explicit SettingsDialog(QList<Step> steps = {}, QWidget* parent = nullptr) : QDialog(parent), m_steps(std::move(steps)) {
         setWindowTitle("Settings");
+        if (m_steps.isEmpty())
+            for (const char* id : {"synth", "pnr", "fom", "sta", "lvs", "bit", "uf2", "program", "program_uf2"}) {
+                Step st;
+                st.id = id;
+                st.label = id;
+                st.nonvolatile = st.id == "program_uf2";
+                m_steps << st;
+            }
         auto* v = new QVBoxLayout(this);
-        auto* box = new QGroupBox("UF2 targets (non-volatile)");
+        auto* tabs = new QTabWidget;
+        auto* flow = new QWidget;
+        auto* fl = new QVBoxLayout(flow);
+        auto* box = new QGroupBox("Tools Run all calls");
         auto* bl = new QVBoxLayout(box);
-        write = new QCheckBox("Write the UF2 to the board when Run all is pressed");
-        write->setChecked(writeNonVolatileOnRunAll());
+        for (const Step& st : m_steps) {
+            auto* c = new QCheckBox(st.nonvolatile ? st.label + "  (writes the board's non-volatile memory)" : st.label);
+            c->setToolTip("step " + st.id);
+            c->setChecked(runAllStep(st.id, st.nonvolatile));
+            m_boxes[st.id] = c;
+            bl->addWidget(c);
+        }
+        fl->addWidget(box);
         auto* note = new QLabel(
-            "Off by default. A UF2 target copies the bitstream to the board's USB drive (the Sonata's SONATA drive), "
-            "where the board's own firmware writes it to non-volatile flash, so it is what the board boots from after a "
-            "power cycle.\n\nWith this off, Run all leaves those steps out and says so; their own buttons in the toolbar "
-            "always work. The JTAG Program step loads the FPGA's volatile configuration and is not affected.");
+            "Run all (the toolbar button, and --run all) calls the ticked steps, in the flow's order, and says which it left out. "
+            "A step's own button in the toolbar always runs it, ticked or not.\n\nThe choice is kept by step name for every project. "
+            "A UF2 step copies the bitstream to the board's USB drive (the Sonata's SONATA drive), where the board's own firmware "
+            "writes it to non-volatile flash, so it is what the board boots from after a power cycle: it is off until ticked. "
+            "The JTAG Program step loads the FPGA's volatile configuration.");
         note->setWordWrap(true);
-        bl->addWidget(write);
-        bl->addWidget(note);
-        v->addWidget(box);
+        fl->addWidget(note);
+        fl->addStretch(1);
+        tabs->addTab(flow, "Flow");
+        v->addWidget(tabs);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, this, [this] { save(); accept(); });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         v->addWidget(buttons);
         setMinimumWidth(480);
     }
-    void save() { setWriteNonVolatileOnRunAll(write->isChecked()); }
-    QCheckBox* write = nullptr;
+    void save() {
+        for (auto it = m_boxes.cbegin(); it != m_boxes.cend(); ++it) setRunAllStep(it.key(), it.value()->isChecked());
+    }
+    QList<Step> m_steps;
+    QMap<QString, QCheckBox*> m_boxes;   // by step id
 };
 
 }  // namespace
+
+// ---------------------------------------------------------------- block RAM contents
+
+// Every block RAM of a routed FASM and what it holds. Pick rows, give them images, save: the memory changes without
+// another place and route (tools/bram_init/). The Bitstream step then makes the new .bit from the saved FASM.
+class BramInitWindow final : public QMainWindow {
+public:
+    explicit BramInitWindow(QWidget* parent = nullptr, Project* project = nullptr) : QMainWindow(parent), m_project(project) {
+        setWindowTitle("Block RAM contents");
+        resize(1240, 720);
+        auto* tb = addToolBar("Block RAM");
+        tb->addAction("Open FASM...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "Open a routed FASM", dirOf(m_path), "FASM (*.fasm);;All files (*)");
+            if (!f.isEmpty()) open(f, guessPlacement(f));
+        });
+        tb->addAction("Placement...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "nextpnr placement (-o placement=), to name the cells", dirOf(m_path), "JSON (*.json)");
+            if (!f.isEmpty()) namePlacement(f);
+        });
+        tb->addSeparator();
+        tb->addAction("Assign image...", this, [this] { assignImages(-1); });
+        tb->addAction("Assign lane files...", this, [this] { assignLanes(); });
+        tb->addAction("Split a binary...", this, [this] { splitBinary(); });
+        tb->addAction("Clear", this, [this] { for (int r : selectedRows()) clearRow(r); showDump(); });
+        tb->addSeparator();
+        tb->addAction("Save", this, [this] { save(m_path); });
+        tb->addAction("Save as...", this, [this] {
+            const QString f = QFileDialog::getSaveFileName(this, "Save the patched FASM", m_path, "FASM (*.fasm)");
+            if (!f.isEmpty()) save(f);
+        });
+        tb->addSeparator();
+        tb->addAction("ROMs: manifest...", this, [this] {
+            const QString f = QFileDialog::getOpenFileName(this, "The synthesis's ROM manifest (verilator --map-only-meminit)", dirOf(m_manifestPath),
+                                                           "JSON (*.json)");
+            if (!f.isEmpty()) loadManifest(f, true);
+        });
+        tb->addAction("ROM image...", this, [this] { romImage(); });
+        tb->addAction("ROM build...", this, [this] { romBuildSetup(); });
+        tb->addAction("Build ROM", this, [this] { romBuild(); });
+        tb->addAction("Apply ROMs", this, [this] { romApply(); });
+        tb->addAction("Save + Bitstream", this, [this] {
+            if (save(m_path) && onBitstream) onBitstream();
+        });
+
+        auto* split = new QSplitter(this);
+        auto* left = new QWidget;
+        auto* lv = new QVBoxLayout(left);
+        lv->setContentsMargins(0, 0, 0, 0);
+        m_filter = new QLineEdit;
+        m_filter->setPlaceholderText("filter by tile or cell name");
+        connect(m_filter, &QLineEdit::textChanged, this, [this] { applyFilter(); });
+        lv->addWidget(m_filter);
+        m_table = new QTableWidget(0, 7);
+        m_table->setHorizontalHeaderLabels({"Tile", "Block", "Width", "Depth", "Cell", "Image", "State"});
+        m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_table->horizontalHeader()->setStretchLastSection(true);
+        m_table->verticalHeader()->setVisible(false);
+        connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] { showDump(); });
+        connect(m_table, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* it) { widthEdited(it); });
+        connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int r, int c) { if (c == 5) assignImages(r); });
+        lv->addWidget(m_table);
+        split->addWidget(left);
+        auto* right = new QWidget;
+        auto* rv = new QVBoxLayout(right);
+        rv->setContentsMargins(0, 0, 0, 0);
+        m_dumpTitle = new QLabel("No block RAM selected");
+        m_dump = new QPlainTextEdit;
+        m_dump->setReadOnly(true);
+        m_dump->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        m_dump->setLineWrapMode(QPlainTextEdit::NoWrap);
+        rv->addWidget(m_dumpTitle);
+        rv->addWidget(m_dump);
+        split->addWidget(right);
+        split->setSizes({860, 380});
+        auto* tabs = new QTabWidget;
+        m_tabs = tabs;
+        tabs->addTab(split, "Block RAMs");
+        tabs->addTab(makeRomTab(), "ROMs");
+        setCentralWidget(tabs);
+        statusBar()->showMessage("Open a routed FASM");
+    }
+
+    static QString guessPlacement(const QString& fasm) {   // nextpnr -o placement= beside the FASM, as the projects name it
+        if (!fasm.endsWith(".fasm")) return QString();
+        const QString p = fasm.chopped(5) + "_placement.json";
+        return QFileInfo::exists(p) ? p : QString();
+    }
+
+    void open(const QString& fasm, const QString& placement) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            bram_init::Fasm f;
+            f.load(fasm.toStdString());
+            m_fasm = std::move(f);
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+        m_path = fasm;
+        m_placement.clear();
+        m_rows.assign(m_fasm.brams.size(), Row());
+        setWindowTitle("Block RAM contents - " + QFileInfo(fasm).fileName());
+        if (!placement.isEmpty()) namePlacement(placement);
+        else fill();
+        const QString man = guessManifest(fasm);
+        if (!man.isEmpty()) loadManifest(man, false);
+    }
+
+    // the ROMs the synthesis made: the project's {meminit}, else a *_meminit.json beside the FASM
+    QString guessManifest(const QString& fasm) const {
+        if (m_project) {
+            const QString p = m_project->expand("{meminit}");
+            if (QFileInfo::exists(p)) return p;
+        }
+        const QStringList found = QDir(QFileInfo(fasm).absolutePath()).entryList({"*_meminit.json"}, QDir::Files);
+        return found.isEmpty() ? QString() : QFileInfo(fasm).absolutePath() + "/" + found.first();
+    }
+
+    void loadManifest(const QString& path, bool report) {
+        try {
+            m_man = bram_init::load_manifest(path.toStdString());
+        } catch (const std::exception& e) {
+            if (report) QMessageBox::critical(this, "ROMs", QString::fromUtf8(e.what()));
+            return;
+        }
+        m_manifestPath = path;
+        m_manLabel->setText(QString("%1: %2 memor%3").arg(QFileInfo(path).fileName()).arg(m_man.memories.size()).arg(m_man.memories.size() == 1 ? "y" : "ies"));
+        fillRoms();
+        if (!m_man.memories.empty()) m_tabs->setCurrentIndex(1);
+    }
+
+    std::function<void()> onBitstream;   // set by the project window: Save + Bitstream runs its Bitstream step
+
+    // --selftest-rom: what a user does in the ROMs tab, without one: give ROM `name` an image (or a build command and the file
+    // it writes), build, Apply and Save to `out`. Returns the exit code.
+    int selftestRom(const QString& name, const QString& image, const QString& build, const QString& output, const QString& out) {
+        if (!m_man.find(name.toStdString())) { std::fprintf(stderr, "no ROM %s in the manifest\n", qPrintable(name)); return 2; }
+        RomSetup s = setupOf(name);
+        if (!image.isEmpty()) s.image = image;
+        s.build = build;
+        s.output = output;
+        setSetup(name, s);
+        fillRoms();
+        for (int i = 0; i < (int)m_man.memories.size(); i++) if (m_man.memories[i].name == name.toStdString()) m_romTable->selectRow(i);
+        if (!build.isEmpty()) {
+            romBuild();
+            QEventLoop loop;
+            QTimer t;
+            connect(&t, &QTimer::timeout, &loop, [&] { if (!m_buildProc && m_buildQueue.isEmpty()) loop.quit(); });
+            t.start(100);
+            loop.exec();
+            std::printf("%s", qPrintable(m_buildLog->toPlainText()));
+            const QString state = m_romState.value(name);
+            if (state.contains("fail") || state.contains("no output")) return 3;
+        } else {
+            romApply();
+        }
+        std::printf("\n%s: %s\n", qPrintable(name), qPrintable(m_romState.value(name)));
+        return save(out) ? 0 : 1;
+    }
+
+    void namePlacement(const QString& placement) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            m_fasm.name_cells(placement.toStdString());
+            m_placement = placement;
+        } catch (const std::exception& e) {
+            QApplication::restoreOverrideCursor();
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+        fill();
+    }
+
+    bool save(const QString& path) {
+        if (path.isEmpty()) return false;
+        int changed = 0;
+        try {
+            for (size_t i = 0; i < m_rows.size(); i++) {
+                Row& r = m_rows[i];
+                if (!r.assigned || m_fasm.same(m_fasm.brams[i], r.img)) continue;
+                m_fasm.write(m_fasm.brams[i], r.img);
+                changed++;
+            }
+            m_fasm.save(path.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::critical(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return false;
+        }
+        m_path = path;
+        for (size_t i = 0; i < m_rows.size(); i++) if (m_rows[i].assigned) setState((int)i);
+        statusBar()->showMessage(QString("%1: %2 block RAM%3 changed; run the Bitstream step for the new .bit")
+                                     .arg(QFileInfo(path).fileName()).arg(changed).arg(changed == 1 ? "" : "s"));
+        return true;
+    }
+
+private:
+    struct Row {
+        QString image;
+        bram_init::Image img;
+        bool assigned = false;
+    };
+    static QString dirOf(const QString& p) { return p.isEmpty() ? QDir::homePath() : QFileInfo(p).absolutePath(); }
+    static QString laneRegex(QWidget* parent, bool* ok) {
+        return QInputDialog::getText(parent, "Lane number", "Regular expression whose first group is the lane number in the cell name:",
+                                     QLineEdit::Normal, "[^0-9]*([0-9]+).*", ok);
+    }
+
+    void fill() {
+        m_table->blockSignals(true);
+        m_table->setRowCount((int)m_fasm.brams.size());
+        int named = 0;
+        for (int i = 0; i < (int)m_fasm.brams.size(); i++) {
+            const bram_init::Bram& b = m_fasm.brams[i];
+            auto cell = [&](int c, const QString& text, bool editable = false) {
+                auto* it = new QTableWidgetItem(text);
+                if (!editable) it->setFlags(it->flags() & ~Qt::ItemIsEditable);
+                m_table->setItem(i, c, it);
+            };
+            cell(0, QString::fromStdString(b.tile));
+            cell(1, b.half < 0 ? "RAMB36E1" : QString("RAMB18_Y%1").arg(b.half), true);
+            cell(2, QString::number(b.port_width), true);
+            cell(3, QString::number(b.depth()));
+            cell(4, QString::fromStdString(b.cell));
+            m_table->item(i, 4)->setToolTip(QString::fromStdString(b.cell));
+            cell(5, m_rows[i].image);
+            cell(6, "");
+            if (!b.cell.empty()) named++;
+            setState(i);
+        }
+        m_table->resizeColumnsToContents();
+        if (m_table->columnWidth(4) > 300) m_table->setColumnWidth(4, 300);   // hierarchical names run long; the tooltip has it all
+        if (m_table->columnWidth(5) < 150) m_table->setColumnWidth(5, 150);
+        m_table->blockSignals(false);
+        applyFilter();
+        statusBar()->showMessage(QString("%1 block RAMs%2").arg(m_fasm.brams.size())
+                                     .arg(m_placement.isEmpty() ? "; Placement... names their cells" : QString(", %1 named").arg(named)));
+    }
+
+    void applyFilter() {
+        const QString t = m_filter->text();
+        for (int r = 0; r < m_table->rowCount(); r++)
+            m_table->setRowHidden(r, !t.isEmpty() && !m_table->item(r, 0)->text().contains(t, Qt::CaseInsensitive) &&
+                                         !m_table->item(r, 4)->text().contains(t, Qt::CaseInsensitive));
+    }
+
+    QList<int> selectedRows() const {
+        QList<int> rows;
+        for (const QModelIndex& ix : m_table->selectionModel()->selectedRows())
+            if (!m_table->isRowHidden(ix.row())) rows.append(ix.row());
+        std::sort(rows.begin(), rows.end());
+        return rows;
+    }
+
+    void setState(int r) {
+        const Row& row = m_rows[r];
+        QString s;
+        if (row.assigned) s = m_fasm.same(m_fasm.brams[r], row.img) ? "same as the FASM" : "will change";
+        m_table->item(r, 5)->setText(row.image);
+        m_table->item(r, 6)->setText(s);
+    }
+
+    void clearRow(int r) {
+        m_rows[r] = Row();
+        setState(r);
+    }
+
+    bool assign(int r, const QString& file, bram_init::Image img) {
+        m_rows[r].image = file;
+        m_rows[r].img = std::move(img);
+        m_rows[r].assigned = true;
+        setState(r);
+        return true;
+    }
+
+    void widthEdited(QTableWidgetItem* it) {
+        const int r = it->row();
+        if (it->column() == 1) {   // the block: "36" makes the tile one RAMB36E1, "18" two RAMB18E1 (a FASM cannot say which)
+            const QString t = it->text().trimmed();
+            const int mode = t.contains("36") ? 36 : t.contains("18") ? 18 : 0;
+            if (mode) m_fasm.set_mode(m_fasm.brams[r].tile, mode);
+            m_rows.assign(m_fasm.brams.size(), Row());
+            fill();
+            return;
+        }
+        if (it->column() != 2) return;
+        bram_init::Bram& b = m_fasm.brams[r];
+        const int w = it->text().toInt();
+        const bool valid = (w == 1 || w == 2 || w == 4 || w == 9 || w == 18 || w == 36 || (w == 72 && b.half < 0));
+        m_table->blockSignals(true);
+        if (!valid) it->setText(QString::number(b.port_width));
+        else if (w != b.port_width) {
+            b.port_width = w;
+            m_table->item(r, 3)->setText(QString::number(b.depth()));
+            if (m_rows[r].assigned) clearRow(r);   // the image was read for the old width
+        }
+        m_table->blockSignals(false);
+        showDump();
+    }
+
+    void assignImages(int row) {
+        QList<int> rows = row >= 0 ? QList<int>{row} : selectedRows();
+        if (rows.isEmpty()) { statusBar()->showMessage("Select the block RAMs first"); return; }
+        QStringList files = QFileDialog::getOpenFileNames(this, rows.size() == 1 ? "Image for the block RAM" : "One image for all, or one per block RAM",
+                                                          dirOf(m_lastImageDir), "Memory images (*.hex *.mem *.bin);;All files (*)");
+        if (files.isEmpty()) return;
+        files.sort();
+        m_lastImageDir = files.first();
+        if (files.size() != 1 && files.size() != rows.size()) {
+            QMessageBox::warning(this, "Block RAM contents", QString("%1 files for %2 block RAMs: choose one file, or one per row").arg(files.size()).arg(rows.size()));
+            return;
+        }
+        int done = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            const QString f = files.size() == 1 ? files.first() : files[i];
+            try {
+                assign(rows[i], f, bram_init::load_image(f.toStdString(), m_fasm.brams[rows[i]]));
+                done++;
+            } catch (const std::exception& e) {
+                QMessageBox::warning(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            }
+        }
+        statusBar()->showMessage(QString("%1 block RAM%2 given an image").arg(done).arg(done == 1 ? "" : "s"));
+        showDump();
+    }
+
+    // lane<NN>.hex from a directory, NN taken from each selected cell's name
+    void assignLanes() {
+        QList<int> rows = selectedRows();
+        if (rows.isEmpty()) for (int r = 0; r < m_table->rowCount(); r++) if (!m_table->isRowHidden(r)) rows.append(r);
+        const QString dir = QFileDialog::getExistingDirectory(this, "Directory of lane<NN>.hex files", dirOf(m_lastImageDir));
+        if (dir.isEmpty()) return;
+        bool ok = false;
+        const QRegularExpression re(laneRegex(this, &ok));
+        if (!ok || !re.isValid()) return;
+        m_lastImageDir = dir + "/x";
+        int done = 0, missing = 0;
+        QStringList errors;
+        for (int r : rows) {
+            const QRegularExpressionMatch m = re.match(QString::fromStdString(m_fasm.brams[r].cell));
+            if (!m.hasMatch() || m.lastCapturedIndex() < 1) continue;
+            const QString f = QString("%1/lane%2.hex").arg(dir).arg(m.captured(1).toInt(), 2, 10, QChar('0'));
+            if (!QFileInfo::exists(f)) { missing++; continue; }
+            try {
+                assign(r, f, bram_init::load_image(f.toStdString(), m_fasm.brams[r]));
+                done++;
+            } catch (const std::exception& e) {
+                errors.append(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!errors.isEmpty()) QMessageBox::warning(this, "Block RAM contents", errors.mid(0, 8).join('\n'));
+        statusBar()->showMessage(QString("%1 lane file%2 assigned, %3 cells without a file").arg(done).arg(done == 1 ? "" : "s").arg(missing));
+        showDump();
+    }
+
+    // byte lane NN of every line of one flat binary to the selected block RAMs
+    void splitBinary() {
+        const QList<int> rows = selectedRows();
+        if (rows.isEmpty()) { statusBar()->showMessage("Select the block RAMs that share the image first"); return; }
+        const QString file = QFileDialog::getOpenFileName(this, "Flat binary image", dirOf(m_lastImageDir), "All files (*)");
+        if (file.isEmpty()) return;
+        bool ok = false;
+        const QRegularExpression re(laneRegex(this, &ok));
+        if (!ok || !re.isValid()) return;
+        const int wordBytes = (m_fasm.brams[rows.first()].data_bits() + 7) / 8;
+        const int lineSize = QInputDialog::getInt(this, "Line size", "Bytes per line of the image (one word per selected block RAM):",
+                                                  rows.size() * wordBytes, wordBytes, 1 << 20, wordBytes, &ok);
+        if (!ok) return;
+        m_lastImageDir = file;
+        std::vector<uint8_t> bytes;
+        try {
+            bytes = bram_init::read_bytes(file.toStdString());
+        } catch (const std::exception& e) {
+            QMessageBox::warning(this, "Block RAM contents", QString::fromUtf8(e.what()));
+            return;
+        }
+        int done = 0;
+        QStringList errors;
+        for (int i = 0; i < rows.size(); i++) {
+            const QRegularExpressionMatch m = re.match(QString::fromStdString(m_fasm.brams[rows[i]].cell));
+            const int lane = (m.hasMatch() && m.lastCapturedIndex() >= 1) ? m.captured(1).toInt() : i;
+            try {
+                assign(rows[i], QString("%1 [lane %2]").arg(QFileInfo(file).fileName()).arg(lane),
+                       bram_init::lane_of(bytes, lane, lineSize, m_fasm.brams[rows[i]]));
+                done++;
+            } catch (const std::exception& e) {
+                errors.append(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!errors.isEmpty()) QMessageBox::warning(this, "Block RAM contents", errors.mid(0, 8).join('\n'));
+        statusBar()->showMessage(QString("%1 lane%2 of %3 assigned").arg(done).arg(done == 1 ? "" : "s").arg(QFileInfo(file).fileName()));
+        showDump();
+    }
+
+    // ---- ROMs: the memories the synthesis made (verilator --map-only-meminit), their images and how to build them
+
+    QWidget* makeRomTab() {
+        auto* w = new QWidget;
+        auto* v = new QVBoxLayout(w);
+        m_manLabel = new QLabel("No manifest: synthesize with --map-only-meminit (the projects' Synthesis step does), or ROMs: manifest...");
+        v->addWidget(m_manLabel);
+        m_showRams = new QCheckBox("Also the memories not read from a file (RAMs)");
+        connect(m_showRams, &QCheckBox::toggled, this, [this] { fillRoms(); });
+        v->addWidget(m_showRams);
+        auto* split = new QSplitter(Qt::Vertical);
+        m_romTable = new QTableWidget(0, 7);
+        m_romTable->setHorizontalHeaderLabels({"ROM", "Size", "Cells placed", "Synthesized from", "Image", "Build", "State"});
+        m_romTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_romTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_romTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        m_romTable->setWordWrap(false);
+        m_romTable->setTextElideMode(Qt::ElideMiddle);
+        m_romTable->horizontalHeader()->setStretchLastSection(true);
+        m_romTable->verticalHeader()->setVisible(false);
+        connect(m_romTable, &QTableWidget::cellDoubleClicked, this, [this](int, int c) { if (c == 5) romBuildSetup(); else romImage(); });
+        split->addWidget(m_romTable);
+        m_buildLog = new QPlainTextEdit;
+        m_buildLog->setReadOnly(true);
+        m_buildLog->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        m_buildLog->setPlaceholderText("Build ROM runs the ROM's build command here, then uses the file it writes as the image");
+        split->addWidget(m_buildLog);
+        split->setSizes({420, 220});
+        v->addWidget(split);
+        return w;
+    }
+
+    QList<int> selectedRoms() const {
+        QList<int> rows;
+        for (const QModelIndex& ix : m_romTable->selectionModel()->selectedRows()) rows.append(ix.row());
+        std::sort(rows.begin(), rows.end());
+        return rows;
+    }
+    const bram_init::Memory* memoryAt(int r) const { return r >= 0 && r < (int)m_man.memories.size() ? &m_man.memories[r] : nullptr; }
+    RomSetup setupOf(const QString& name) const { return m_project ? m_project->roms.value(name) : m_romSetup.value(name); }
+    void setSetup(const QString& name, const RomSetup& s) {
+        if (!m_project) { m_romSetup[name] = s; return; }
+        m_project->roms[name] = s;
+        QString err;
+        if (!m_project->saveRoms(err)) statusBar()->showMessage("ROM setup not saved: " + err, 6000);
+    }
+    // the image a ROM takes: the one set here, else the file it was synthesized from
+    QString imageOf(const bram_init::Memory& m) const {
+        const RomSetup s = setupOf(QString::fromStdString(m.name));
+        return !s.image.isEmpty() ? s.image : QString::fromStdString(m.init_path);
+    }
+    // a command or path of a ROM: the project's {names} (or the FASM's directory as {work}), {rom} and {image}
+    QString romExpand(QString t, const bram_init::Memory& m, const QString& image) const {
+        t.replace("{rom}", QString::fromStdString(m.name));
+        t.replace("{image}", image);
+        if (m_project) return m_project->expand(t);
+        t.replace("{work}", QFileInfo(m_path).absolutePath());
+        return t;
+    }
+
+    void fillRoms() {
+        std::map<std::string, int> placed;
+        for (const bram_init::Bram& b : m_fasm.brams) if (!b.cell.empty()) placed[b.cell]++;
+        m_romTable->setRowCount((int)m_man.memories.size());
+        for (int i = 0; i < (int)m_man.memories.size(); i++) {
+            const bram_init::Memory& m = m_man.memories[i];
+            int n = 0;
+            for (const bram_init::MemCell& c : m.cells) n += placed.count(c.cell) ? 1 : 0;
+            const RomSetup s = setupOf(QString::fromStdString(m.name));
+            auto cell = [&](int c, const QString& text, const QString& tip = QString()) {
+                auto* it = new QTableWidgetItem(text);
+                it->setToolTip(tip.isEmpty() ? text : tip);
+                m_romTable->setItem(i, c, it);
+            };
+            cell(0, QString::fromStdString(m.name));
+            cell(1, QString("%1 x %2").arg(m.width).arg(m.depth));
+            cell(2, QString("%1 / %2").arg(n).arg(m.cells.size()), m_placement.isEmpty() ? "Placement... names the cells" : QString());
+            cell(3, QString::fromStdString(m.init_file.empty() ? "(none: not read from a file)" : m.init_path));
+            cell(4, s.image);
+            cell(5, s.build);
+            cell(6, m_romState.value(QString::fromStdString(m.name)));
+        }
+        bool anyFile = false;
+        for (const bram_init::Memory& m : m_man.memories) anyFile |= !m.init_file.empty();
+        for (int i = 0; i < (int)m_man.memories.size(); i++)   // a design with no ROM shows all its memories
+            m_romTable->setRowHidden(i, anyFile && m_man.memories[i].init_file.empty() && !m_showRams->isChecked());
+        m_romTable->resizeColumnsToContents();
+        for (int c : {0, 3, 4, 5}) if (m_romTable->columnWidth(c) > 340) m_romTable->setColumnWidth(c, 340);
+    }
+    void setRomState(const bram_init::Memory& m, const QString& text) {
+        m_romState[QString::fromStdString(m.name)] = text;
+        for (int i = 0; i < (int)m_man.memories.size(); i++)
+            if (&m_man.memories[i] == &m) { m_romTable->item(i, 6)->setText(text); break; }
+    }
+    QList<const bram_init::Memory*> romTargets() {
+        QList<const bram_init::Memory*> out;
+        QList<int> rows = selectedRoms();
+        if (rows.isEmpty()) for (int i = 0; i < (int)m_man.memories.size(); i++) if (!m_romTable->isRowHidden(i)) rows.append(i);
+        for (int r : rows) if (const bram_init::Memory* m = memoryAt(r)) out.append(m);
+        return out;
+    }
+
+    void romImage() {
+        const QList<int> rows = selectedRoms();
+        if (rows.size() != 1) { statusBar()->showMessage("Select one ROM to give an image"); return; }
+        const bram_init::Memory& m = *memoryAt(rows.first());
+        const QString f = QFileDialog::getOpenFileName(this, "Image for the ROM " + QString::fromStdString(m.name), dirOf(imageOf(m)),
+                                                       "Memory images (*.hex *.mem *.init *.bin);;All files (*)");
+        if (f.isEmpty()) return;
+        RomSetup s = setupOf(QString::fromStdString(m.name));
+        s.image = f;
+        setSetup(QString::fromStdString(m.name), s);
+        fillRoms();
+    }
+
+    void romBuildSetup() {
+        const QList<int> rows = selectedRoms();
+        if (rows.size() != 1) { statusBar()->showMessage("Select one ROM to set the build command of"); return; }
+        const bram_init::Memory& m = *memoryAt(rows.first());
+        const QString name = QString::fromStdString(m.name);
+        RomSetup s = setupOf(name);
+        QDialog d(this);
+        d.setWindowTitle("Build command for the ROM " + name);
+        d.resize(760, 360);
+        auto* form = new QFormLayout(&d);
+        auto* cmd = new QPlainTextEdit(s.build);
+        cmd->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        cmd->setPlaceholderText("any shell command, e.g.  make -C {srcdir}/fw hex  or  riscv64-unknown-elf-gcc -o fw.elf main.c && objcopy -O binary fw.elf {image}");
+        auto* dir = new QLineEdit(s.dir);
+        dir->setPlaceholderText("where it runs (default: the project directory)");
+        auto* out = new QLineEdit(s.output);
+        out->setPlaceholderText("the file the command writes: .hex/.mem/.init as $readmemh, anything else raw words");
+        form->addRow(new QLabel("Runs through bash. {srcdir} {work} {root} {top} ... as in a step; {rom} is the ROM's name and {image} the output file below."));
+        form->addRow("Command", cmd);
+        form->addRow("Directory", dir);
+        form->addRow("Output", out);
+        auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        form->addRow(bb);
+        if (d.exec() != QDialog::Accepted) return;
+        s.build = cmd->toPlainText().trimmed();
+        s.dir = dir->text().trimmed();
+        s.output = out->text().trimmed();
+        setSetup(name, s);
+        fillRoms();
+    }
+
+    // Run the selected ROMs' build commands one after the other; each output becomes the ROM's image and is applied
+    void romBuild() {
+        if (m_buildProc) { statusBar()->showMessage("A build is running"); return; }
+        m_buildQueue.clear();
+        for (const bram_init::Memory* m : romTargets())
+            if (!setupOf(QString::fromStdString(m->name)).build.isEmpty()) m_buildQueue.append(QString::fromStdString(m->name));
+        if (m_buildQueue.isEmpty()) { statusBar()->showMessage("No selected ROM has a build command: ROM build..."); return; }
+        m_buildLog->clear();
+        buildNext();
+    }
+    void buildNext() {
+        if (m_buildQueue.isEmpty()) {
+            statusBar()->showMessage("Builds done");
+            romApply();
+            return;
+        }
+        const QString name = m_buildQueue.takeFirst();
+        const bram_init::Memory* m = m_man.find(name.toStdString());
+        const RomSetup s = setupOf(name);
+        const QString out = romExpand(s.output, *m, QString());
+        const QString cmd = romExpand(s.build, *m, out);
+        QString dir = romExpand(s.dir, *m, out);
+        if (dir.isEmpty()) dir = m_project ? m_project->dir : QFileInfo(m_path).absolutePath();
+        m_buildLog->appendPlainText(QString("$ cd %1 && %2\n").arg(dir, cmd));
+        setRomState(*m, "building...");
+        auto* proc = new QProcess(this);
+        m_buildProc = proc;
+        proc->setWorkingDirectory(dir);
+        proc->setProcessEnvironment(Project::bundled() ? Project::bundledEnvironment() : QProcessEnvironment::systemEnvironment());
+        proc->setProcessChannelMode(QProcess::MergedChannels);
+        connect(proc, &QProcess::readyRead, this, [this, proc] {
+            m_buildLog->moveCursor(QTextCursor::End);
+            m_buildLog->insertPlainText(QString::fromLocal8Bit(proc->readAll()));
+        });
+        connect(proc, &QProcess::errorOccurred, this, [this, proc, name](QProcess::ProcessError e) {
+            if (e != QProcess::FailedToStart) return;
+            m_buildLog->appendPlainText("cannot start bash: " + proc->errorString());
+            m_buildProc = nullptr;
+            m_buildQueue.clear();
+            if (const auto* mm = m_man.find(name.toStdString())) setRomState(*mm, "build failed");
+            proc->deleteLater();
+        });
+        connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this, proc, name, out](int code, QProcess::ExitStatus) {
+            m_buildProc = nullptr;
+            proc->deleteLater();
+            const auto* mm = m_man.find(name.toStdString());
+            if (!mm) return;
+            if (code != 0) {
+                m_buildLog->appendPlainText(QString("\nexit %1: %2 not changed").arg(code).arg(name));
+                setRomState(*mm, "build failed");
+                m_buildQueue.clear();
+                return;
+            }
+            if (!out.isEmpty()) {
+                if (!QFileInfo::exists(out)) {
+                    m_buildLog->appendPlainText("\nthe command did not write " + out);
+                    setRomState(*mm, "no output file");
+                    m_buildQueue.clear();
+                    return;
+                }
+                RomSetup s = setupOf(name);
+                s.image = out;
+                setSetup(name, s);
+                fillRoms();
+            }
+            setRomState(*mm, "built");
+            buildNext();
+        });
+        proc->start("/bin/bash", {"-c", cmd});
+    }
+
+    // Give the block RAMs of the selected ROMs (all, when none is selected) their image: the table rows then say "will change",
+    // and Save writes the FASM
+    void romApply() {
+        if (m_man.memories.empty()) { statusBar()->showMessage("No ROM manifest"); return; }
+        if (m_fasm.brams.empty()) { statusBar()->showMessage("Open the routed FASM first"); return; }
+        std::map<std::string, int> index;
+        for (int i = 0; i < (int)m_fasm.brams.size(); i++) if (!m_fasm.brams[i].cell.empty()) index[m_fasm.brams[i].cell] = i;
+        int roms = 0, cells = 0, errors = 0;
+        QStringList msgs;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        for (const bram_init::Memory* m : romTargets()) {
+            const QString file = imageOf(*m);
+            if (file.isEmpty()) { setRomState(*m, "no image"); continue; }
+            try {
+                const std::vector<uint64_t> words = bram_init::load_words(file.toStdString(), m->width, m->depth);
+                int placed = 0, changed = 0;
+                for (const bram_init::MemCell& c : m->cells) {
+                    auto it = index.find(c.cell);
+                    if (it == index.end()) continue;
+                    placed++;
+                    const bram_init::Bram& b = m_fasm.brams[it->second];
+                    bram_init::Image img = bram_init::cell_image(*m, c, words, b);
+                    changed += m_fasm.same(b, img) ? 0 : 1;
+                    assign(it->second, QFileInfo(file).fileName() + " [" + QString::fromStdString(m->name) + "]", std::move(img));
+                }
+                cells += placed;
+                roms++;
+                if (placed == 0) setRomState(*m, "no cells in the FASM: Placement... must be this FASM's");
+                else setRomState(*m, QString("%1 of %2 cells will change").arg(changed).arg(placed));
+            } catch (const std::exception& e) {
+                errors++;
+                msgs << QString::fromUtf8(e.what());
+                setRomState(*m, "error");
+            }
+        }
+        QApplication::restoreOverrideCursor();
+        if (!msgs.isEmpty()) QMessageBox::warning(this, "ROMs", msgs.mid(0, 6).join('\n'));
+        statusBar()->showMessage(QString("%1 ROM%2 applied to %3 block RAMs; Save writes the FASM%4").arg(roms).arg(roms == 1 ? "" : "s").arg(cells)
+                                     .arg(onBitstream ? ", Save + Bitstream makes the .bit" : ""));
+        fillRoms();
+        showDump();
+    }
+
+    void showDump() {
+        const int r = m_table->currentRow();
+        if (r < 0 || r >= (int)m_fasm.brams.size()) {
+            m_dumpTitle->setText("No block RAM selected");
+            m_dump->clear();
+            return;
+        }
+        const bram_init::Bram& b = m_fasm.brams[r];
+        m_dumpTitle->setText(QString("%1  %2  x%3, %4 words%5").arg(QString::fromStdString(b.key()), b.half < 0 ? "RAMB36E1" : "RAMB18E1")
+                                 .arg(b.data_bits()).arg(b.depth()).arg(b.cell.empty() ? QString() : "  " + QString::fromStdString(b.cell)));
+        const size_t shown = 4096;
+        QString text = "In the FASM:\n" + QString::fromStdString(bram_init::hex_dump(m_fasm.read(b), shown));
+        const Row& row = m_rows[r];
+        if (row.assigned)
+            text += "\n" + row.image + (m_fasm.same(b, row.img) ? " (same as the FASM):\n" : " (will replace it):\n") +
+                    QString::fromStdString(bram_init::hex_dump(row.img, shown));
+        m_dump->setPlainText(text);
+    }
+
+    bram_init::Fasm m_fasm;
+    std::vector<Row> m_rows;
+    Project* m_project = nullptr;                // when opened from a project: the ROM setups are kept in its file
+    bram_init::Manifest m_man;
+    QString m_manifestPath;
+    QMap<QString, RomSetup> m_romSetup;          // without a project
+    QMap<QString, QString> m_romState;
+    QTabWidget* m_tabs = nullptr;
+    QLabel* m_manLabel = nullptr;
+    QCheckBox* m_showRams = nullptr;
+    QTableWidget* m_romTable = nullptr;
+    QPlainTextEdit* m_buildLog = nullptr;
+    QProcess* m_buildProc = nullptr;
+    QStringList m_buildQueue;
+    QString m_path, m_placement, m_lastImageDir;
+    QTableWidget* m_table = nullptr;
+    QLineEdit* m_filter = nullptr;
+    QPlainTextEdit* m_dump = nullptr;
+    QLabel* m_dumpTitle = nullptr;
+};
 
 class MainWindow final : public QMainWindow {
 public:
@@ -1184,7 +1959,7 @@ public:
         auto* prefs = new QAction("Settings...", this);
         prefs->setMenuRole(QAction::PreferencesRole);
         prefs->setShortcut(QKeySequence::Preferences);
-        connect(prefs, &QAction::triggered, this, [this] { SettingsDialog(this).exec(); });
+        connect(prefs, &QAction::triggered, this, [this] { SettingsDialog(m_p.steps, this).exec(); });
         menuBar()->addMenu("&File")->addAction(prefs);
 
         // pipeline
@@ -1201,7 +1976,7 @@ public:
             QStringList left;
             const QList<Step> steps = runAllSteps(&left);
             if (!left.isEmpty())
-                statusBar()->showMessage("Run all leaves out " + left.join(", ") + " (writes non-volatile memory; Settings... turns it on)", 12000);
+                statusBar()->showMessage("Run all leaves out " + left.join(", ") + " (Settings... > Flow ticks the tools it calls)", 12000);
             runSteps(steps);
         });
         tb->addAction("Stop", this, [this] { stop(); });
@@ -1214,6 +1989,22 @@ public:
         tb->addAction("Open project...", this, [this] {
             const QString f = QFileDialog::getOpenFileName(this, "Open project", QFileInfo(m_p.path).absolutePath(), "synthgui project (*.json)");
             if (!f.isEmpty()) openProjectWindow(f);
+        });
+        tb->addAction("Block RAMs...", this, [this] {   // the routed FASM's memories: new contents without a new P&R
+            const QString fasm = m_p.expand("{fasm}");
+            if (!QFileInfo::exists(fasm)) {
+                statusBar()->showMessage("No routed FASM yet: run Place & route first", 8000);
+                return;
+            }
+            auto* w = new BramInitWindow(this, &m_p);
+            w->setAttribute(Qt::WA_DeleteOnClose);
+            w->onBitstream = [this] {
+                for (const Step& st : m_p.steps)
+                    if (st.id == "bit") { runSteps({st}); return; }
+                statusBar()->showMessage("This project has no Bitstream step", 6000);
+            };
+            w->open(fasm, BramInitWindow::guessPlacement(fasm));
+            w->show();
         });
 
         if (!m_p.sources.isEmpty()) openFile(m_p.sources.last(), 0);
@@ -1256,12 +2047,11 @@ protected:
     }
 
 public:
-    // the steps of Run all: every step, except non-volatile ones unless Settings has them on (left gets the labels of those)
+    // the steps of Run all: those Settings > Flow ticks (left gets the labels of the others)
     QList<Step> runAllSteps(QStringList* left = nullptr) const {
-        const bool nv = writeNonVolatileOnRunAll();
         QList<Step> r;
         for (const Step& s : m_p.steps) {
-            if (s.nonvolatile && !nv) { if (left) *left << s.label; continue; }
+            if (!runAllStep(s.id, s.nonvolatile)) { if (left) *left << s.label; continue; }
             r << s;
         }
         return r;
@@ -1274,7 +2064,7 @@ public:
         for (const Step& s : m_p.steps)
             if (ids.contains(s.id) || (ids.contains("all") && all.contains(s))) steps << s;
         if (ids.contains("all") && !left.isEmpty())
-            fprintf(stderr, "synthgui: --run all leaves out %s (writes non-volatile memory; Settings turns it on, or name the step)\n",
+            fprintf(stderr, "synthgui: --run all leaves out %s (Settings > Flow ticks the tools it calls, or name the step)\n",
                     qPrintable(left.join(", ")));
         m_done = std::move(done);
         runSteps(steps);
@@ -1955,7 +2745,8 @@ int main(int argc, char** argv) {
         if (!strcmp(tool, "bit2uf2")) return bit2uf2_main(targc, targv);
         if (!strcmp(tool, "sta-prep")) return sta_prep_main(targc, targv);
         if (!strcmp(tool, "bram-fom")) return bram_fom_main(targc, targv);
-        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom)\n", tool);
+        if (!strcmp(tool, "bram-init")) return bram_init_main(targc, targv);
+        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom, bram-init)\n", tool);
         return 2;
     }
     QApplication app(argc, argv);
@@ -1976,24 +2767,57 @@ int main(int argc, char** argv) {
                                 "project (repeatable; keys as in the project's \"options\")", "key=value"});
     cl.addOption({"log", "step whose log the log view shows (--screenshot)", "id", "pnr"});
     cl.addOption({"work", "use this work directory instead of the project's own", "dir"});
+    cl.addOption({"bram-init", "open the block RAM contents window on this routed FASM, no project needed", "fasm"});
+    cl.addOption({"placement", "nextpnr placement JSON for --bram-init (names the cells); default <fasm>_placement.json", "json"});
+    cl.addOption({"meminit", "ROM manifest for --bram-init (verilator --map-only-meminit); default *_meminit.json beside the FASM", "json"});
     cl.addOption({"run", "run these steps first (comma-separated ids, or all), then screenshot or exit", "steps"});
-    QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog, set its UF2 checkbox on or off (keep: leave it), "
-                                       "--screenshot it, accept it and print what is stored", "on|off|keep");
+    QCommandLineOption selftestSettings("selftest-settings", "open the Settings dialog on the --project's steps (the usual ones without it), set Flow tick "
+                                       "boxes (id=on|off,id=off...; keep: leave them), --screenshot it, accept it and print what is stored", "boxes|keep");
     selftestSettings.setFlags(QCommandLineOption::HiddenFromHelp);
     cl.addOption(selftestSettings);
+    QCommandLineOption selftestRom("selftest-rom", "with --bram-init: ROM,image,out.fasm[,build,output]: set the ROM's image (or build command and "
+                                   "output), build, apply and save", "fields");
+    selftestRom.setFlags(QCommandLineOption::HiddenFromHelp);
+    cl.addOption(selftestRom);
     QCommandLineOption selftest("selftest-new", "fill and create a new project: name,out.json,work,xdc,src...", "fields");
     selftest.setFlags(QCommandLineOption::HiddenFromHelp);
     cl.addOption(selftest);
     cl.process(app);
     if (cl.isSet("work")) Project::workOverride = QDir(cl.value("work")).absoluteFilePath(".");
     if (cl.isSet("selftest-settings")) {  // drive the Settings dialog without a user
-        SettingsDialog d;
+        QList<Step> steps;
+        if (cl.isSet("project")) {
+            Project p;
+            QString err;
+            if (p.load(cl.value("project"), err)) steps = p.steps;
+            else std::fprintf(stderr, "synthgui: %s\n", qPrintable(err));
+        }
+        SettingsDialog d(steps);
         const QString v = cl.value("selftest-settings");
-        if (v == "on" || v == "off") d.write->setChecked(v == "on");
+        if (v != "keep")
+            for (const QString& kv : v.split(',', Qt::SkipEmptyParts)) {
+                const QStringList p = kv.split('=');
+                if (d.m_boxes.contains(p.value(0))) d.m_boxes[p.value(0)]->setChecked(p.value(1) == "on");
+                else std::fprintf(stderr, "synthgui: the Flow tab has no step %s\n", qPrintable(p.value(0)));
+            }
         if (cl.isSet("screenshot")) { d.show(); app.processEvents(); d.grab().save(cl.value("screenshot")); }
         d.save();
-        std::printf("uf2/writeOnRunAll=%d\n", writeNonVolatileOnRunAll() ? 1 : 0);
+        for (const Step& st : d.m_steps)
+            std::printf("flow/runAll/%s=%d\n", qPrintable(st.id), runAllStep(st.id, st.nonvolatile) ? 1 : 0);
         return 0;
+    }
+    if (cl.isSet("bram-init")) {   // the block RAM contents window on its own
+        BramInitWindow w;
+        const QString fasm = cl.value("bram-init");
+        w.open(fasm, cl.isSet("placement") ? cl.value("placement") : BramInitWindow::guessPlacement(fasm));
+        if (cl.isSet("meminit")) w.loadManifest(cl.value("meminit"), true);
+        if (cl.isSet("selftest-rom")) {   // fields are separated by a tab, so a command can hold commas
+            const QStringList a = cl.value("selftest-rom").split('\t');
+            return w.selftestRom(a.value(0), a.value(1), a.value(3), a.value(4), a.value(2));
+        }
+        w.show();
+        if (cl.isSet("screenshot")) QTimer::singleShot(500, [&] { w.grab().save(cl.value("screenshot")); app.quit(); });
+        return app.exec();
     }
     Project p;
     QString err;

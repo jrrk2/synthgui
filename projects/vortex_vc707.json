@@ -57,7 +57,7 @@
     {
       "id": "synth",
       "label": "Synthesize",
-      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}"
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --map-only-meminit {meminit} --Mdir {work}/obj {xilinx_stubs} {sources}"
     },
     {
       "id": "pnr",

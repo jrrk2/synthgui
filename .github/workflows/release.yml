@@ -6,7 +6,7 @@
 #   macOS    built on macos-15 arm64, signed with a Developer ID Application certificate (hardened runtime), notarized with
 #            Apple's notary service and stapled (scripts/package-macos.sh).
 #   Linux    scripts/package-linux.sh, Ubuntu 24.04 x86-64.
-#   Windows  windows-release.yml, called as it is (built from source on windows-latest, signed by SignPath when configured).
+#   Windows  windows-release.yml, called as it is (built from source on windows-latest; unsigned, to be signed by hand: RELEASE-WINDOWS.md).
 #
 # The macOS and Linux tools (verilator, nextpnr with its chip databases, ...) are not rebuilt here: they come from the cache the
 # flow workflow fills, under the same key (the submodule commits and build-deps.sh). Run this on a commit whose flow run has
@@ -195,7 +195,7 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-  # the whole of windows-release.yml (tools, Verilator, nextpnr, package, SignPath when configured) as a job of this run
+  # the whole of windows-release.yml (tools, Verilator, nextpnr, package) as a job of this run
   windows:
     if: inputs.windows
     needs: version
