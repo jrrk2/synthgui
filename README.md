@@ -25,12 +25,14 @@ What it does today (stage one: every tool is a separate process):
 * **Pipeline**: a toolbar button per step plus *Run all*; each step runs in
   the project's work directory, streams into the Log view, is saved as
   `<work>/<step>.log`, and shows ok / FAILED and its time in the status bar.
-* **Settings** (*Settings...* in the application menu on macOS, Cmd+,; File menu elsewhere): one preference so far, per user and
-  **off by default**: whether *Run all* writes the board's non-volatile memory. A step that does (the Sonata's `program_uf2`,
-  which copies the UF2 to the SONATA drive, where the board writes it to flash; or any step with `"nonvolatile": true` in the
-  project file) is left out of *Run all* and of `--run all` unless it is on, and the status bar (or stderr) says which. Its own
-  toolbar button, and naming it (`--run program_uf2`), always run it. JTAG programming loads volatile memory and is not affected.
-  The setting is in the user's preferences (`uk.kimmitt.synthgui` on macOS); `SYNTHGUI_SETTINGS=file.ini` uses a file instead.
+* **Settings** (*Settings...* in the application menu on macOS, Cmd+,; File menu elsewhere), per user. The **Flow** tab has a tick
+  box for each step of the project: *Run all* (and `--run all`) calls the ticked ones, in the flow's order, and the status bar
+  (or stderr) says which it left out. A step's own toolbar button, and naming it (`--run program_uf2`), always run it. The choice
+  is kept by step name, so it holds for every project; a step never ticked or cleared is on, except one that writes the board's
+  non-volatile memory (the Sonata's `program_uf2`, which copies the UF2 to the SONATA drive, where the board writes it to flash; or
+  any step with `"nonvolatile": true` in the project file), which is **off until ticked**. That replaces the earlier single
+  preference `uf2/writeOnRunAll`, which is still read for a step whose box has not been touched. JTAG programming loads volatile
+  memory. The settings are in the user's preferences (`uk.kimmitt.synthgui` on macOS); `SYNTHGUI_SETTINGS=file.ini` uses a file instead.
 * **Area**: the mapper's `%Info: map:` cell counts grouped into device
   resources (LUT, FF, RAMB36, LUTRAM, DSP, IO, BUFG) with utilisation of the
   part, before placement; after placement, nextpnr's own utilisation.
