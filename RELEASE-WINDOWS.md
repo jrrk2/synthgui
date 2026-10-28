@@ -40,8 +40,7 @@ not emulated: Windows is slow at builds that start many processes (MSYS2 emulate
 Steps:
 
 1. Bump `SYNTHGUI_VERSION` in `CMakeLists.txt`: the zip's name comes from it. Commit and push.
-2. Either test first: *Actions → Windows release → Run workflow*. The zip is the run's artifact `synthgui-windows`
-   (the package folder before signing is `synthgui-windows-unsigned`).
+2. Either test first: *Actions → Windows release → Run workflow*. The zip is the run's artifact `synthgui-windows`.
 3. Or release: `git tag vX.Y.Z-windows && git push origin vX.Y.Z-windows`. The run does the same and also creates a
    **draft** release with the zip and its SHA-256.
 4. Check the zip (below), then edit the draft's notes, using the v0.1.1-windows release as the model (download line, what
@@ -66,33 +65,21 @@ folder, and with neither MSYS2 nor bash available (for example `PATH` set to `C:
 The run of 2026-10-24 (40110127725) passed all of it on Windows 11 with Smart App Control on, except *program*, which
 needed the Sonata plugged in. Its xc7vx485t chip database came out byte-identical to the one in the macOS 0.1.1 release.
 
-## Signing (SignPath Foundation)
+## Signing (Certum Open Source Code Signing)
 
-Applied for on 2026-10-24; SignPath accepts projects depending on their reputation. Until then the zip is unsigned,
-and its release notes must say so.
+The route is a Certum *Open Source Code Signing* certificate in the cloud (SimplySign). Its key stays in Certum's HSM and is used through the SimplySign client, which asks for a one-time code
+from the phone app on each login: nothing the workflow can do from a runner. So the workflow builds the zip unsigned, and
+the signing is done by hand on a Windows PC where SimplySign is logged in, before the draft release is published:
 
-What SignPath requires, and where it is met:
+1. Download the run's artifact (or the draft release's zip) and unzip it.
+2. Sign `bin\synthgui.exe` with `signtool sign /fd SHA256 /tr http://time.certum.pl /td SHA256 /a bin\synthgui.exe`
+   (the timestamp keeps the signature valid after the certificate expires), then `signtool verify /pa /v` it.
+3. Zip the folder again with the same name, put it on the draft release in place of the unsigned one
+   (`gh release upload TAG ZIP --clobber`), and replace "Not signed" in the notes with "Signed by Certum" and the new
+   SHA-256.
 
-- An OSI-approved licence for all components: GPL-3.0 (`LICENSE`); bundled files keep their own compatible licences.
-- A "Code signing policy" on the project's home page: the README section of that name.
-- Builds from source on GitHub-hosted runners, the artifact uploaded by the workflow, manual approval of each signing
-  request: the workflow above.
-- Only the project's own binaries are signed: `.signpath/artifact-configuration.xml` signs `bin/synthgui.exe`. The other
-  projects' tools and the DLLs are bundled unsigned, which their terms allow. fasm2netlist (`tileverilog`,
-  `lvs_equiv`) is jrrk2's own project and can be added there if SignPath agrees it counts.
-- Multi-factor authentication on GitHub and SignPath for everyone on the team.
-
-When the project is accepted:
-
-1. Install the SignPath GitHub App on the repository.
-2. In SignPath: link the project to the predefined *GitHub.com* trusted build system, and paste
-   `.signpath/artifact-configuration.xml` as its artifact configuration.
-3. In the repository settings: secret `SIGNPATH_API_TOKEN`; variables `SIGNPATH_ORGANIZATION_ID`,
-   `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` (and `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` if not the
-   project's default). With the variables set, the workflow submits the package, waits up to five hours for the
-   approval, checks the signature on `synthgui.exe` (`Get-AuthenticodeSignature`) and zips the signed folder.
-4. In the README's *Code signing policy*, replace "applied for; until then the Windows zip is unsigned" with SignPath's
-   attribution: "Free code signing provided by SignPath.io, certificate by SignPath Foundation".
+Until a release has been signed its notes say so. Only `synthgui.exe` is signed; the other projects' tools and the DLLs
+are bundled unsigned.
 
 Why signing matters: Windows 11's Smart App Control judges unsigned programs one by one and can block any of them, and
 a user cannot allow a single program, only turn Smart App Control off (and Windows only lets it back on after a reset).
@@ -100,10 +87,10 @@ It blocked a stripped `openFPGALoader.exe` here while letting the unstripped one
 openFPGALoader unstripped. Signing `synthgui.exe` covers synthgui itself; the bundled tools stay unsigned until their
 own projects sign them.
 
-Other routes, looked at and not taken: Azure Artifact Signing takes individual developers only in the US and Canada,
-and its organisation validation needs a legal entity in public records, which a UK sole trader is not. A commercial
-code-signing certificate in your own name (from about $250 a year) would also work, with a signtool step in
-`package-windows.sh`. Cloudflare issues TLS certificates, not code-signing ones.
+Other routes, looked at and not taken: Azure Artifact Signing
+takes individual developers only in the US and Canada, and its organisation validation needs a legal entity in public
+records, which a UK sole trader is not. Cloudflare issues TLS certificates, not code-signing ones. A signing service with
+an API for CI would let the workflow sign by itself, if the by-hand step becomes a burden.
 
 ## Programming boards on Windows
 

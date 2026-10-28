@@ -1,14 +1,12 @@
-# Windows build of synthgui and the tools it runs, from source on GitHub-hosted runners, signed by SignPath when it is
-# configured, and attached to a draft release when a v*-windows tag is pushed.
+# Windows build of synthgui and the tools it runs, from source on GitHub-hosted runners, attached to a draft release when
+# a v*-windows tag is pushed.
 #
 #   Run by hand (Actions > Windows release > Run workflow): the zip is kept as the run's artifact "synthgui-windows".
 #   git tag v0.1.2-windows && git push origin v0.1.2-windows: the same, plus a draft release with the zip, to check
 #   and publish by hand.
 #
-# Signing (SignPath Foundation): set the repository secret SIGNPATH_API_TOKEN and the repository variables
-# SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG and SIGNPATH_SIGNING_POLICY_SLUG (and SIGNPATH_ARTIFACT_CONFIGURATION_SLUG
-# if not the default; .signpath/artifact-configuration.xml is the configuration to give it). Without them the zip is
-# unsigned. Each signing request waits for its approval in SignPath.
+# The zip is unsigned: it is signed by hand afterwards (RELEASE-WINDOWS.md, Signing), as a Certum certificate's key
+# stays in Certum's cloud and cannot be used from a runner.
 #
 # Nothing built is cached between runs: every binary in the zip comes from this run (scripts/build-deps.sh,
 # scripts/package-windows.sh). The MSYS2 packages are MSYS2's own builds.
@@ -118,10 +116,9 @@ jobs:
   package:
     needs: [tools, verilator, nextpnr]
     runs-on: windows-latest
-    timeout-minutes: 330      # most of it is the wait for the signing request's approval
+    timeout-minutes: 60
     permissions:
       contents: write         # the draft release
-      actions: read           # SignPath reads the workflow run and its artifact
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -146,46 +143,16 @@ jobs:
         run: echo "version=$(sed -n 's/^set(SYNTHGUI_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)" >> "$GITHUB_OUTPUT"
       - shell: msys2 {0}
         run: scripts/package-windows.sh
-      - id: unsigned
-        uses: actions/upload-artifact@v4
-        with:
-          name: synthgui-windows-unsigned
-          if-no-files-found: error
-          path: build-release/synthgui-${{ steps.version.outputs.version }}-windows-x64/
-
-      - name: Sign (SignPath)
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 18000
-          output-artifact-directory: build-release/signed/synthgui-${{ steps.version.outputs.version }}-windows-x64
-      - name: Check the signature
-        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
-        shell: pwsh
-        run: |
-          $f = "build-release/signed/synthgui-${{ steps.version.outputs.version }}-windows-x64/bin/synthgui.exe"
-          $s = Get-AuthenticodeSignature $f
-          "$($s.Status): $($s.SignerCertificate.Subject)"
-          if ($s.Status -ne 'Valid') { exit 1 }
 
       - name: Zip
         id: zip
         shell: msys2 {0}
         run: |
           name=synthgui-${{ steps.version.outputs.version }}-windows-x64
-          dir=build-release; [ -d build-release/signed/$name ] && dir=build-release/signed
           rm -f build-release/$name.zip
-          (cd $dir && zip -qr -9 "$OLDPWD/build-release/$name.zip" $name)
+          (cd build-release && zip -qr -9 "$OLDPWD/build-release/$name.zip" $name)
           echo "zip=build-release/$name.zip" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum build-release/$name.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          [ $dir = build-release/signed ] && echo "signed=yes" >> "$GITHUB_OUTPUT" || echo "signed=no" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: synthgui-windows
@@ -203,7 +170,7 @@ jobs:
           (the v0.1.1-windows release notes are the model).
 
           Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} from commit ${{ github.sha }}.
-          Signed with SignPath: ${{ steps.zip.outputs.signed }}.
+          Not signed: this is the unsigned build.
 
           SHA-256: \`${{ steps.zip.outputs.sha256 }}\`
           EOF

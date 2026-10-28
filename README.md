@@ -322,10 +322,7 @@ carries these steps for its users in `README-Windows.txt` (`scripts/README-Windo
 
 `.github/workflows/windows-release.yml` makes the same package on GitHub's Windows runners, from source with nothing
 cached: run it from the Actions tab for a test build (the zip is the run's artifact), or push a `v*-windows` tag for a
-draft release to check and publish. It is set up for signing by [SignPath Foundation](https://signpath.org), which
-signs only builds made this way: once the project is accepted, the secret `SIGNPATH_API_TOKEN` and the variables
-`SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` turn it on, with
-`.signpath/artifact-configuration.xml` as the project's artifact configuration (it signs `synthgui.exe`).
+draft release to check and publish; the zip it makes is unsigned and is signed by hand afterwards.
 `RELEASE-WINDOWS.md` is the release procedure: making, checking, signing and publishing a Windows release.
 
 The GUI alone also builds with the Qt installer's kits (MSVC 2022 or MinGW) and no submodules:
@@ -350,11 +347,11 @@ app, and drafts one GitHub release with the archives and their SHA-256 sums; the
 ## Code signing policy
 
 Windows releases are built from this repository's source by `.github/workflows/windows-release.yml` on GitHub-hosted
-runners, and are to be signed by [SignPath Foundation](https://signpath.org) through [SignPath.io](https://signpath.io)
-(applied for; until then the Windows zip is unsigned and says so in its release notes). Only synthgui's own program,
-`bin/synthgui.exe`, is signed. The tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader,
-fasm2netlist) and the MINGW64 and Qt libraries are other projects' builds, made from source in the same workflow, and
-are not signed.
+runners. The zip is built unsigned and is to be signed by hand with a Certum Open Source Code Signing certificate; a
+release that has not been signed says so in its release notes. Only synthgui's own program, `bin/synthgui.exe`, is
+signed. The tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader,
+fasm2netlist) and the MINGW64 and Qt libraries are other projects' builds, made from source in the same workflow,
+and are not signed.
 
 Team roles:
 
