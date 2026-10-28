@@ -64,6 +64,12 @@
             "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}",
             "id": "program",
             "label": "Program"
+        },
+        {
+            "id": "program_flash",
+            "label": "Program (BPI flash)",
+            "command": "OPENFPGALOADER_SOJ_DIR={bpi_bridge_dir} {openfpgaloader} -b vc707 -f {bit}",
+            "nonvolatile": true
         }
     ],
     "top": "top",
@@ -73,5 +79,6 @@
     "xdc": "{root}/projects/counter/top.xdc",
     "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
     "family": "virtex7",
-    "tileverilog": "{builds}/fasm2netlist/tileverilog"
+    "tileverilog": "{builds}/fasm2netlist/tileverilog",
+    "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge"
 }

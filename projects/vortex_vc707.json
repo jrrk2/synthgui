@@ -52,6 +52,7 @@
   "prjxray_db": "{deps}/prjxray-db",
   "sta": "{prefix}/bin/sta",
   "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge",
   "steps": [
     {
       "id": "synth",
@@ -77,6 +78,12 @@
       "id": "program",
       "label": "Program",
       "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    },
+    {
+      "id": "program_flash",
+      "label": "Program (BPI flash)",
+      "command": "OPENFPGALOADER_SOJ_DIR={bpi_bridge_dir} {openfpgaloader} -b vc707 -f {bit}",
+      "nonvolatile": true
     }
   ],
   "capacity": {

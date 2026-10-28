@@ -1,0 +1,238 @@
+# Release synthgui for macOS (signed and notarized), Linux and Windows, by hand: Actions > release > Run workflow.
+#
+# The result is one DRAFT release with the three archives and their SHA-256 sums, to check and publish by hand. Nothing here
+# publishes: a draft is visible only to people with write access.
+#
+#   macOS    built on macos-15 arm64, signed with a Developer ID Application certificate (hardened runtime), notarized with
+#            Apple's notary service and stapled (scripts/package-macos.sh).
+#   Linux    scripts/package-linux.sh, Ubuntu 24.04 x86-64.
+#   Windows  windows-release.yml, called as it is (built from source on windows-latest, signed by SignPath when configured).
+#
+# The macOS and Linux tools (verilator, nextpnr with its chip databases, ...) are not rebuilt here: they come from the cache the
+# flow workflow fills, under the same key (the submodule commits and build-deps.sh). Run this on a commit whose flow run has
+# finished green, so the release carries the tools that were tested; if the cache has no entry the job stops and says so.
+# openFPGALoader, which the flow does not need, is built here (a few minutes).
+#
+# Repository secrets for macOS (Settings > Secrets and variables > Actions):
+#   MACOS_CERT_P12        base64 of the exported "Developer ID Application" certificate with its private key (.p12)
+#   MACOS_CERT_PASSWORD   the .p12's password
+#   NOTARY_KEY_P8         base64 of an App Store Connect API key (AuthKey_XXXX.p8; Users and Access > Integrations)
+#   NOTARY_KEY_ID         that key's ID
+#   NOTARY_ISSUER         the issuer ID shown above the keys list
+# Without them, run with "notarize" off to get an ad-hoc signed zip (Gatekeeper will refuse it); with "notarize" on the job
+# fails at the first step rather than after the build.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag of the release, e.g. v0.1.2 (created on this commit)'
+        required: true
+      notarize:
+        description: 'sign with Developer ID and notarize the macOS app (needs the secrets above)'
+        type: boolean
+        default: true
+      windows:
+        description: 'also build Windows (about two hours; nothing is cached)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  APT_PACKAGES: >-
+    build-essential cmake ninja-build autoconf automake libtool bison flex libfl-dev help2man perl python3
+    zlib1g-dev libboost-program-options-dev libboost-iostreams-dev libboost-thread-dev libboost-filesystem-dev
+    libboost-system-dev libeigen3-dev tcl-dev tcl-tclreadline libreadline-dev swig libjemalloc-dev
+    qt6-base-dev libgl-dev jq libusb-1.0-0-dev libftdi1-dev libhidapi-dev libudev-dev
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          echo "version=$(sed -n 's/^set(SYNTHGUI_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt)" >> "$GITHUB_OUTPUT"
+      - name: The tag must not exist, and the secrets must
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARIZE: ${{ inputs.notarize }}
+          HAVE: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.NOTARY_KEY_P8 != '' && secrets.NOTARY_KEY_ID != '' && secrets.NOTARY_ISSUER != '' }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::the tag ${{ inputs.tag }} exists already"; exit 1
+          fi
+          if [ "$NOTARIZE" = true ] && [ "$HAVE" != true ]; then
+            echo "::error::notarize is on but a macOS signing secret is missing (see the header of release.yml)"; exit 1
+          fi
+
+  macos:
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packages
+        run: brew install qt cmake ninja boost eigen autoconf automake libtool bison flex help2man tcl-tk@8 swig libffi pkgconf jq libusb hidapi libftdi
+
+      - name: Cache key (as the flow workflow's macOS job)
+        id: key
+        run: echo "key=tools-mac-v1-$(git ls-tree HEAD deps/ | shasum -a 256 | cut -c1-16)-${{ hashFiles('scripts/build-deps.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: The tools the flow built
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          fail-on-cache-miss: true      # run the flow workflow on this commit first
+          path: |
+            build-deps/prefix
+            build-deps/nextpnr/nextpnr-himbaechel
+            build-deps/nextpnr/share
+            build-deps/fasm2netlist/tileverilog
+            build-deps/fasm2netlist/lvs_equiv
+            build-deps/prjxray/tools/xc7frames2bit
+
+      - name: Build openFPGALoader, and fetch the chip databases
+        run: |
+          git submodule update --init --depth 1 deps/openFPGALoader deps/prjxray-db deps/prjxray
+          scripts/build-deps.sh ofl
+
+      - name: Developer ID certificate
+        if: inputs.notarize
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12 }}
+          PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEY: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          kc=$RUNNER_TEMP/release.keychain-db
+          pw=$(uuidgen)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$CERT" | base64 -D > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "$KEY" | base64 -D > "$RUNNER_TEMP/AuthKey.p8"
+          security find-identity -v -p codesigning "$kc"
+
+      - name: Package, sign, notarize, staple
+        env:
+          SYNTHGUI_VERSION: ${{ needs.version.outputs.version }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          # without a certificate, an ad-hoc signature (Gatekeeper refuses the result; the zip is for trying the build only)
+          if [ "${{ inputs.notarize }}" = true ]; then export NOTARY_KEY=$RUNNER_TEMP/AuthKey.p8; else export SIGN_ID=-; fi
+          scripts/package-macos.sh
+
+      - name: Gatekeeper's verdict
+        if: inputs.notarize
+        run: |
+          spctl --assess --type execute --verbose=2 build-release/synthgui.app
+          xcrun stapler validate build-release/synthgui.app
+
+      - name: Remove the credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"; security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthgui-macos
+          path: build-release/synthgui-*-macos-arm64.zip
+          compression-level: 0
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packages
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends $APT_PACKAGES
+
+      - name: Cache key (as the flow workflow's tools job)
+        id: key
+        run: echo "key=tools-v1-$(git ls-tree HEAD deps/ | sha256sum | cut -c1-16)-${{ hashFiles('scripts/build-deps.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: The tools the flow built
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          fail-on-cache-miss: true      # run the flow workflow on this commit first
+          path: |
+            build-deps/prefix
+            build-deps/nextpnr/nextpnr-himbaechel
+            build-deps/nextpnr/share
+            build-deps/fasm2netlist/tileverilog
+            build-deps/fasm2netlist/lvs_equiv
+            build-deps/prjxray/tools/xc7frames2bit
+
+      - name: Build openFPGALoader, and fetch the chip databases
+        run: |
+          git submodule update --init --depth 1 deps/openFPGALoader deps/prjxray-db deps/prjxray
+          scripts/build-deps.sh ofl
+          strip build-deps/prefix/bin/openFPGALoader
+
+      - name: Package
+        env:
+          SYNTHGUI_VERSION: ${{ needs.version.outputs.version }}
+        run: scripts/package-linux.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthgui-linux
+          path: build-release/synthgui-*-linux-x86_64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
+  # the whole of windows-release.yml (tools, Verilator, nextpnr, package, SignPath when configured) as a job of this run
+  windows:
+    if: inputs.windows
+    needs: version
+    uses: ./.github/workflows/windows-release.yml
+    permissions:
+      contents: write
+      actions: read
+    secrets: inherit
+
+  release:
+    needs: [version, macos, linux, windows]
+    # the Windows build is optional: a skipped job does not stop the release, a failed one does
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true, pattern: 'synthgui-{macos,linux,windows}' }
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum * > SHA256SUMS
+          cat > ../notes.md <<EOF
+          synthgui $VERSION for macOS (arm64, notarized: ${{ inputs.notarize }}), Linux (Ubuntu 24.04 x86-64) and Windows (x64).
+          Draft: edit these notes before publishing.
+
+          Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} from commit ${{ github.sha }}.
+
+          SHA-256:
+          \`\`\`
+          $(cat SHA256SUMS)
+          \`\`\`
+          EOF
+          gh release create "${{ inputs.tag }}" ./* --draft --target "${{ github.sha }}" \
+            --repo "$GITHUB_REPOSITORY" --title "synthgui $VERSION" --notes-file ../notes.md

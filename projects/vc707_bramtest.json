@@ -65,6 +65,12 @@
       "id": "program",
       "label": "Program",
       "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}"
+    },
+    {
+      "id": "program_flash",
+      "label": "Program (BPI flash)",
+      "command": "OPENFPGALOADER_SOJ_DIR={bpi_bridge_dir} {openfpgaloader} -b vc707 -f {bit}",
+      "nonvolatile": true
     }
   ],
   "capacity": {
@@ -87,5 +93,6 @@
     "synth.warn.UNOPTFLAT": "1",
     "synth.warn.TIMESCALEMOD": "1",
     "synth.warn.SPECIFYIGN": "1"
-  }
+  },
+  "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge"
 }

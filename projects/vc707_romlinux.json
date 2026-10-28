@@ -101,6 +101,12 @@
       "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}",
       "id": "program",
       "label": "Program"
+    },
+    {
+      "id": "program_flash",
+      "label": "Program (BPI flash)",
+      "command": "OPENFPGALOADER_SOJ_DIR={bpi_bridge_dir} {openfpgaloader} -b vc707 -f {bit}",
+      "nonvolatile": true
     }
   ],
   "tileverilog": "{builds}/fasm2netlist/tileverilog",
@@ -110,5 +116,6 @@
   "work": "~/synthgui-work/vc707_romlinux",
   "xdc": "{root}/projects/vc707_romlinux-src/xilinx_vc707.xdc",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
-  "bram_fom_budget": "6100/5400"
+  "bram_fom_budget": "6100/5400",
+  "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge"
 }

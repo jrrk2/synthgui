@@ -16,6 +16,7 @@ name: Windows release
 
 on:
   workflow_dispatch:
+  workflow_call:            # the release workflow (release.yml) runs this for its Windows zip
   push:
     tags: ['v*-windows']
 
