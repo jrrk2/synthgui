@@ -33,19 +33,33 @@ set_false_path -to [get_ports eth_rst_n]
 
 # Hard-block placement (see vc707_ethmin_vm_open.xdc for why these are
 # required: left free, the PHY MMCMs land where the GT clocks cannot reach).
-set_property LOC BUFGCTRL_X0Y18 [get_cells clkgen.clk_mac_bufg]
-set_property LOC BUFGCTRL_X0Y16 [get_cells clkgen.clk_sys_bufg]
-set_property LOC MMCME2_ADV_X1Y5 [get_cells clkgen.mmcm]
-set_property LOC GTXE2_CHANNEL_X1Y1 [get_cells u_core.u_framing.eth.i_phy.GTXE2_CHANNEL]
-set_property LOC MMCME2_ADV_X0Y6 [get_cells u_core.u_framing.eth.i_phy.MMCME2_ADV]
-set_property LOC MMCME2_ADV_X0Y3 [get_cells u_core.u_framing.eth.i_phy.MMCME2_ADV_1]
-set_property LOC BUFGCTRL_X0Y1 [get_cells u_core.u_framing.eth.i_phy.bufg_ethrx125]
-set_property LOC BUFGCTRL_X0Y0 [get_cells u_core.u_framing.eth.i_phy.bufg_ethrx62]
-set_property LOC BUFGCTRL_X0Y19 [get_cells u_core.u_framing.eth.i_phy.bufg_ethtx125]
-set_property LOC BUFGCTRL_X0Y17 [get_cells u_core.u_framing.eth.i_phy.bufg_ethtx62]
-set_property LOC BUFGCTRL_X0Y2 [get_cells u_core.u_framing.eth.i_phy.bufg_rxoutrebuf]
-set_property LOC BUFGCTRL_X0Y3 [get_cells u_core.u_framing.eth.i_phy.bufg_txoutrebuf]
+# get_cells takes the netlist's cell names, where the synthesis flattens the
+# hierarchy with '_' (clkgen_mmcm, not clkgen.mmcm); nextpnr ignores a name
+# that matches nothing without a word, so these must be exact.
+set_property LOC BUFGCTRL_X0Y18 [get_cells clkgen_clk_mac_bufg]
+set_property LOC BUFGCTRL_X0Y16 [get_cells clkgen_clk_sys_bufg]
+set_property LOC MMCME2_ADV_X1Y5 [get_cells clkgen_mmcm]
+set_property LOC GTXE2_CHANNEL_X1Y1 [get_cells u_core_u_framing_eth_i_phy_GTXE2_CHANNEL]
+set_property LOC MMCME2_ADV_X0Y6 [get_cells u_core_u_framing_eth_i_phy_MMCME2_ADV]
+set_property LOC MMCME2_ADV_X0Y3 [get_cells u_core_u_framing_eth_i_phy_MMCME2_ADV_1]
+set_property LOC BUFGCTRL_X0Y1 [get_cells u_core_u_framing_eth_i_phy_bufg_ethrx125]
+set_property LOC BUFGCTRL_X0Y0 [get_cells u_core_u_framing_eth_i_phy_bufg_ethrx62]
+set_property LOC BUFGCTRL_X0Y19 [get_cells u_core_u_framing_eth_i_phy_bufg_ethtx125]
+set_property LOC BUFGCTRL_X0Y17 [get_cells u_core_u_framing_eth_i_phy_bufg_ethtx62]
+set_property LOC BUFGCTRL_X0Y2 [get_cells u_core_u_framing_eth_i_phy_bufg_rxoutrebuf]
+set_property LOC BUFGCTRL_X0Y3 [get_cells u_core_u_framing_eth_i_phy_bufg_txoutrebuf]
 
 # The PHY's recovered clocks (nextpnr cannot derive them from the GTX).
 create_clock -name eth_rx_clk -period 8.000 [get_nets u_core.u_framing.eth.eth_rx_clk]
 create_clock -name eth_tx_clk -period 8.000 [get_nets u_core.u_framing.eth.eth_tx_clk]
+
+# Lanes: one BUFHCE per lane, and a BUFHCE drives exactly the clock region it
+# sits in, so nextpnr keeps the whole lane there (heavyhash_lanes.sv).  Sites:
+# BUFHCE_X0Y<12r..12r+11> drive region X0Y<r>, BUFHCE_X1Y<12r..> region X1Y<r>.
+# The control logic, MAC and PHY are left X1Y0 and the PHY MMCM regions X0Y3/X0Y6.
+# One line per lane in LANES (vc707_miner.json); a line for an absent lane is
+# ignored.
+set_property LOC BUFHCE_X1Y12 [get_cells u_core_i_hh_gen_lane_0__u_bufh]
+set_property LOC BUFHCE_X1Y36 [get_cells u_core_i_hh_gen_lane_1__u_bufh]
+set_property LOC BUFHCE_X1Y48 [get_cells u_core_i_hh_gen_lane_2__u_bufh]
+set_property LOC BUFHCE_X0Y48 [get_cells u_core_i_hh_gen_lane_3__u_bufh]
