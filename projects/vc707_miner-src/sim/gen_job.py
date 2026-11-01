@@ -6,6 +6,7 @@ Writes:
   frames.hex   every byte of every frame, one per line (hex)
   frames.len   one frame length per line (decimal), in send order
   expect.txt   "<nonce_start> <expected_nonce>" (decimal)
+  valid.txt    every nonce in the 64-nonce window that meets the target
 
 The frames are mine_daemon's (main.rs build_config_hdr / build_config_mat)
 behind a 14-byte Ethernet header to the FPGA's MAC, without FCS: the test
@@ -43,7 +44,7 @@ def main():
     pre_pow = bytes(range(0x11, 0x11 + 32))   # any 32 bytes
     timestamp = 0x0000018F_12345678
     nonce_start = 0x0123_4567_89AB_CDE0
-    window = 8
+    window = 64
 
     finals = []
     for k in range(window):
@@ -82,6 +83,10 @@ def main():
         f.writelines(f"{len(fr)}\n" for fr in frames)
     with open(os.path.join(out, "expect.txt"), "w") as f:
         f.write(f"{nonce_start} {expected}\n")
+    # every nonce in the window that meets the target: with several lanes the
+    # one reported first depends on how the nonces are split between them
+    with open(os.path.join(out, "valid.txt"), "w") as f:
+        f.writelines(f"{nonce_start + k}\n" for k in range(window) if finals[k] <= target)
     print(f"frames {[len(x) for x in frames]}  nonce_start {nonce_start:#x}  expected {expected:#x}"
           f" (+{expected - nonce_start})")
 

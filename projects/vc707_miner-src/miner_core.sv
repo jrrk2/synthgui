@@ -1,6 +1,6 @@
 // miner_core.sv -- the board-independent miner: LiteEth SGMII + MAC + frame
 // buffers (framing_miner), mine_ctrl, and the HeavyHash lanes, all on one
-// clock.  vc707_miner.sv wraps it with the VC707's clocks, reset and LEDs;
+// clock (each lane through its own BUFHCE).  vc707_miner.sv wraps it with the VC707's clocks, reset and LEDs;
 // sim/tb_miner.sv drives it with mine_daemon's frames.
 
 `default_nettype none
@@ -103,13 +103,11 @@ module miner_core #(
     .dbg_flags      ()
   );
 
-  // heavyhash_multi's phase-spread clocks all tied to clk_mac: its per-lane
-  // retiming registers and 2FF result synchronisers become plain pipeline
-  // stages in one domain.
-  heavyhash_multi #(.NUM_LANES(LANES)) i_hh (
+  // heavyhash_lanes: one BUFHCE (one clock region) per lane, configured
+  // over a narrow chain; see its header
+  heavyhash_lanes #(.NUM_LANES(LANES)) i_hh (
     .clk         (clk_mac),
     .rst_n       (rst_mac_n),
-    .phase_clk   ({4{clk_mac}}),
     .start       (hh_start),
     .stop        (hh_stop),
     .busy        (hh_busy),

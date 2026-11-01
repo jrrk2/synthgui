@@ -13,6 +13,10 @@
 `timescale 1ns/1ps
 `default_nettype none
 
+`ifndef TB_LANES
+`define TB_LANES 1
+`endif
+
 module tb_miner;
   // ---- clocks: clk_mac 100 MHz, clk_sys 50 MHz ----
   logic clk_mac = 0, clk_sys = 0;
@@ -33,7 +37,7 @@ module tb_miner;
 `ifdef GATE
   miner_core dut (
 `else
-  miner_core #(.LANES(1)) dut (
+  miner_core #(.LANES(`TB_LANES)) dut (
 `endif
     .clk_mac(clk_mac), .rst_mac_n(rst_mac_n), .clk_sys(clk_sys), .resetn(resetn),
     .sgmii_rxp(1'b0), .sgmii_rxn(1'b1), .sgmii_txp(sgmii_txp), .sgmii_txn(sgmii_txn),
@@ -50,6 +54,8 @@ module tb_miner;
   integer      frame_len [0:7];
   integer      nframes;
   logic [63:0] nonce_start, nonce_expect;
+  logic [63:0] valid_nonce [0:63];
+  integer      nvalid;
   string       job;
 
   initial begin
@@ -66,6 +72,13 @@ module tb_miner;
     fd = $fopen({job, "/expect.txt"}, "r");
     n = $fscanf(fd, "%d %d", nonce_start, nonce_expect);
     $fclose(fd);
+    nvalid = 0;
+    fd = $fopen({job, "/valid.txt"}, "r");
+    while (fd != 0 && !$feof(fd) && nvalid < 64) begin
+      n = $fscanf(fd, "%d\n", valid_nonce[nvalid]);
+      if (n == 1) nvalid = nvalid + 1;
+    end
+    if (fd != 0) $fclose(fd);
     $display("tb: %0d frames, nonce_start %h, expect nonce %h", nframes, nonce_start, nonce_expect);
   end
 
@@ -166,12 +179,20 @@ module tb_miner;
     disable wait_nonce;
     repeat (100) @(posedge clk_mac);
 
-    pass = acks == nframes && naks == 0 && nonces == 1 && found_nonce == nonce_expect;
+    // 1 lane: exactly the first passing nonce; more: any passing nonce
+    pass = acks == nframes && naks == 0 && nonces >= 1;
+    if (`TB_LANES == 1) pass = pass && nonces == 1 && found_nonce == nonce_expect;
+    else begin
+      bit ok = 0;
+      for (int i = 0; i < nvalid; i++) if (valid_nonce[i] == found_nonce) ok = 1;
+      pass = pass && ok;
+    end
     for (int i = 0; i < nframes && i < 16; i++)
       if (ack_seq[i] != frame_bytes_seq(i)) pass = 0;
     $display("tb: acks %0d/%0d naks %0d nonces %0d heartbeats %0d mining %b found %b",
              acks, nframes, naks, nonces, heartbeats, led_mining, led_found);
-    if (nonces) $display("tb: found %h expected %h", found_nonce, nonce_expect);
+    if (nonces) $display("tb: found %h expected %h (%0d lanes; %0d nonces in the window pass)",
+                         found_nonce, nonce_expect, `TB_LANES, nvalid);
     if (pass) $display("tb: PASS");
     else      $display("tb: FAIL");
     $finish;

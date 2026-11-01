@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# run_gate.sh [workdir] [--rtl-lanes] -- tb_miner on the verilator synthesis
+# run_gate.sh [workdir] [--rtl-lanes]   (LANES=<n>, default 1) -- tb_miner on the verilator synthesis
 # branch's mapped netlist of miner_core (sgmii_soc black-boxed; the stub
 # stands in for it), simulated with iverilog.
 #
-#   --rtl-lanes   also black-box heavyhash_multi and simulate it from RTL:
+#   --rtl-lanes   also black-box heavyhash_lanes and simulate it from RTL:
 #                 only framing_miner + mine_ctrl are gates (about 1 min, not ~1 h)
 #
 # Cell models: ~/synthgui/xc7/cells_sim.v, except RAMB36E1, whose model there
@@ -21,14 +21,15 @@ mkdir -p "$work"
 python3 "$here/gen_job.py" "$work/job"
 
 bb="BUFG FDCE GTXE2_CHANNEL IBUFDS IBUFDS_GTE2 MMCME2_ADV RAMB36E1 IBUF OBUF sgmii_soc"
-[ $rtl_lanes = 1 ] && bb="$bb heavyhash_multi"
+[ $rtl_lanes = 1 ] && bb="$bb heavyhash_lanes"
+LANES=${LANES:-1}
 args=(); for b in $bb; do args+=(--struct-only-blackbox "$b"); done
 hh=("$src/keccak_pkg.sv" "$src/heavyhash_pkg.sv" "$src/keccak_round.sv" "$src/keccak256.sv"
-    "$src/heavyhash_matrix.sv" "$src/heavyhash_pipeline.sv" "$src/heavyhash_multi.sv")
+    "$src/heavyhash_matrix.sv" "$src/heavyhash_pipeline.sv" "$src/heavyhash_lanes.sv")
 eth=("$src/liteeth_sgmii_phy.v" "$src/rgmii_lfsr.sv" "$src/axis_gmii_rx.sv" "$src/axis_gmii_tx.sv"
      "$src/eth_mac_1g.sv" "$src/eth_pkt_buf256.sv" "$src/eth_gmii_retime256.sv" "$src/sgmii_soc_liteeth.sv")
 VERILATOR_ROOT=$PREFIX/share/verilator "$PREFIX/bin/verilator_bin" -Wno-fatal --quiet \
-  --top-module miner_core --struct-only-report "${args[@]}" \
+  --top-module miner_core -GLANES=$LANES --struct-only-report "${args[@]}" \
   --map-only-output "$work/core.json" --map-only-verilog "$work/core_mapped.v" --Mdir "$work/obj" \
   "$X/cells_sim.v" "$X/cells_xtra.v" "${hh[@]}" "$src/mine_ctrl.sv" "${eth[@]}" \
   "$src/framing_miner.sv" "$src/miner_core.sv" > "$work/synth.log" 2>&1
@@ -36,7 +37,7 @@ grep -E '%Info: map|%Warning-MAP' "$work/synth.log" || true
 
 sed '/^module RAMB36E1/,/^endmodule/d' "$X/cells_sim.v" > "$work/cells_nobram.v"
 rtl=(); [ $rtl_lanes = 1 ] && rtl=("${hh[@]}")
-iverilog -g2012 -DGATE -DUNISIM -s tb_miner -s glbl -o "$work/tb_gate" \
+iverilog -g2012 -DGATE -DUNISIM -DTB_LANES=$LANES -s tb_miner -s glbl -o "$work/tb_gate" \
   "$work/cells_nobram.v" "$UNISIM_DIR/unisims/RAMB36E1.v" "$UNISIM_DIR/glbl.v" \
   "${rtl[@]}" "$work/core_mapped.v" "$here/sgmii_soc_stub.sv" "$here/tb_miner.sv" \
   > "$work/build.log" 2>&1 || { grep -i error "$work/build.log" | head; exit 1; }
