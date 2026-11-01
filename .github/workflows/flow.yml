@@ -272,3 +272,25 @@ jobs:
           path: ci-out
           retention-days: 14
           if-no-files-found: ignore
+
+  # Do Linux and macOS (and, when it runs the flow, Windows) produce the same bitstreams from this commit?  Independent of
+  # ci/expected, which a submodule bump legitimately changes: here every platform built the same tools.  Reports only for
+  # now (AGREE_GATE: '1' makes a disagreement fail the run).
+  agree:
+    name: platforms agree
+    needs: [flow, macos]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch every platform's hashes
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flow-*
+          path: artifacts
+
+      - name: Compare
+        env:
+          AGREE_GATE: '0'
+        run: scripts/ci-agree.sh artifacts

@@ -16,10 +16,14 @@
 #             does not, as the projects pass --timing-allow-fail); a design with no clock at all passes;
 #   baseline  the frames (the bitstream's content) are the ones recorded in ci/expected/<platform>.txt (<platform> is `uname -s`-`uname -m`).
 #             The same inputs give the same bitstream on one machine, so a change in the hash is a change in the flow: a tool,
-#             a project, a submodule.  If it is intended, CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those
-#             projects' lines (the CI job uploads hashes.txt, in the same format, for refreshing a platform from its runner).
-#             Floating point in the placer can differ between platforms, hence one file each; a platform or project with no
-#             recorded line is not checked and says so.
+#             a project, a submodule.  Each recorded hash carries the tools key it was made with (the submodule commits and
+#             build-deps.sh, as the CI tool cache is keyed): a different hash from the SAME tools fails (a project change, or the
+#             flow is not deterministic), a different hash from DIFFERENT tools is reported and does not fail -- a submodule
+#             bump is expected to change bitstreams, and is not a reason to fail every project.  CI_BASELINE=update
+#             scripts/ci-flow.sh PROJECT... rewrites those projects' lines (the CI job uploads hashes.txt, in the same format,
+#             for refreshing a platform from its runner).  Whether the platforms agree with each other is checked separately,
+#             within one CI run, by the workflow's agree job (scripts/ci-agree.sh).  A platform or project with no recorded
+#             line is not checked and says so.
 set -u
 cd "$(dirname "$0")/.."
 bin=${SYNTHGUI:-build/synthgui}
@@ -34,6 +38,8 @@ mkdir -p "$base"
 : > "$base/hashes.txt"
 
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+# what built the tools: the submodule commits and build-deps.sh (the CI tool cache key's inputs), the same on every platform
+toolkey=$(git ls-tree HEAD deps/ scripts/build-deps.sh | shasum -a 256 | cut -c1-16)
 
 # every clock's last report (nextpnr prints each before and after routing) must say PASS; prints what it found
 timing_check() {
@@ -55,7 +61,8 @@ timing_check() {
 skipped_steps() { [ -f ci/skip-steps.txt ] && awk -v p="$1" '!/^#/ && $1==p {print $2}' ci/skip-steps.txt; }
 skip_reason() { awk -v p="$1" -v s="$2" '!/^#/ && $1==p && $2==s {$1=$2=""; sub(/^ +/, ""); print}' ci/skip-steps.txt; }
 
-recorded() { [ -f "$expected" ] && awk -v p="$1" -v a="$2" '$1==p && $2==a {print $3}' "$expected"; }
+# the recorded hash and tools key ("" if the line predates keys) of a project's artifact
+recorded() { [ -f "$expected" ] && awk -v p="$1" -v a="$2" '$1==p && $2==a {print $3, $4}' "$expected"; }
 
 printf '| project | step | result | seconds |\n| --- | --- | --- | --- |\n' | tee -a "$summary"
 for name in "$@"; do
@@ -102,13 +109,16 @@ for name in "$@"; do
         res="ok"
         for a in frames; do
             h=$(sha "$work/$top.$a")
-            echo "$name $a $h" >> "$base/hashes.txt"
-            r=$(recorded "$name" "$a")
+            echo "$name $a $h $toolkey" >> "$base/hashes.txt"
+            read -r rh rk <<< "$(recorded "$name" "$a")"
             if [ "$mode" = check ]; then
-                if [ -z "$r" ]; then res="none recorded"
-                elif [ "$r" != "$h" ]; then
-                    res="**CHANGED** $a (${h:0:12}, recorded ${r:0:12}; CI_BASELINE=update scripts/ci-flow.sh $name, if intended)"
+                if [ -z "$rh" ]; then res="none recorded"
+                elif [ "$rh" = "$h" ]; then res="ok"
+                elif [ "$rk" = "$toolkey" ]; then
+                    res="**CHANGED** $a with the same tools ($toolkey): ${h:0:12}, recorded ${rh:0:12}; CI_BASELINE=update scripts/ci-flow.sh $name, if intended"
                     failed+=("$name/baseline")
+                else
+                    res="tools changed (recorded with ${rk:-no key}, now $toolkey): ${h:0:12}, recorded ${rh:0:12}; not compared"
                 fi
             fi
         done
@@ -127,7 +137,7 @@ if [ "$mode" = update ]; then
     if [ -s "$base/hashes.txt" ]; then
         mkdir -p "$(dirname "$expected")"
         # replace the lines of the projects that produced new hashes; keep the others' (a project that failed keeps its line)
-        { echo "# $platform: sha256 of each project's frames (the FASM text's line order is not stable between builds); CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those projects' lines"
+        { echo "# $platform: sha256 of each project's frames (the FASM text's line order is not stable between builds), and the tools key it was made with; CI_BASELINE=update scripts/ci-flow.sh PROJECT... rewrites those projects' lines"
           { [ -f "$expected" ] && grep -v '^#' "$expected" | awk 'NR==FNR {new[$1]=1; next} !($1 in new)' "$base/hashes.txt" -
             cat "$base/hashes.txt"; } | sort -u; } > "$expected.new" && mv "$expected.new" "$expected"
         echo "baseline: $expected has $(grep -vc '^#' "$expected") lines"
