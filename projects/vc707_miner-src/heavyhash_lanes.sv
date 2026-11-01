@@ -31,6 +31,10 @@
 //   * Results come back the same way: found, the found nonce and the summed
 //     hash count, chained lane to lane (lane NUM_LANES-1 first, lane 0 last,
 //     next to the controller).  A lane earlier in that chain wins a tie.
+//
+//   * A lane is heavyhash_lane.sv, identical for every instance (its number
+//     is a constant port), so the open flow maps it once and reuses that
+//     mapped netlist, and one placement, for every lane.
 
 `default_nettype none
 
@@ -145,10 +149,14 @@ module heavyhash_lanes
   // ================================================================
   //  Lanes
   // ================================================================
-  logic [BW-1:0]        bus   [NUM_LANES+1];   // bus[i] into lane i
-  logic [NUM_LANES:0]   r_found, r_busy;       // index i: out of lane i (NUM_LANES: none)
-  logic [63:0]          r_nonce  [NUM_LANES+1];
-  logic [63:0]          r_count  [NUM_LANES+1];
+  // Packed: these connect lane instance outputs, and an unpacked array driven
+  // only through instance ports is taken for a memory by the synthesis branch,
+  // which then drops those connections (heavyhash_lane is mapped on its own and
+  // instantiated as a black box).  Index i: into lane i (bus), out of lane i
+  // (results); NUM_LANES is the end of each chain.
+  logic [NUM_LANES:0][BW-1:0] bus;
+  logic [NUM_LANES:0]         r_found, r_busy;
+  logic [NUM_LANES:0][63:0]   r_nonce, r_count;
 
   assign bus[0]             = ser;
   assign r_found[NUM_LANES] = 1'b0;
@@ -167,108 +175,21 @@ module heavyhash_lanes
       assign lane_clk = clk;
 `endif
 
-      logic [2:0] rst_sr;
-      always_ff @(posedge lane_clk or negedge rst_n)
-        if (!rst_n) rst_sr <= 3'b000;
-        else        rst_sr <= {rst_sr[1:0], 1'b1};
-      wire lane_rst_n = rst_sr[2];
-
-      // ---- config chain: this lane's copy of the bus, passed on ----
-      logic [BW-1:0] b;
-      always_ff @(posedge lane_clk or negedge lane_rst_n)
-        if (!lane_rst_n) b <= '0;
-        else             b <= bus[g];
-      assign bus[g+1] = b;
-
-      // One register per 64-bit config word, each with its own decoded
-      // enable: FDRE/CE, no LUT per bit (an indexed part-select write into
-      // the wide vectors cost a LUT mux on every one of the ~4.9k bits).
-      wire        b_valid = b[73];
-      wire [1:0]  b_cmd   = b[72:71];
-      wire [6:0]  b_idx   = b[70:64];
-      wire [63:0] b_data  = b[63:0];
-
-      wire cfg_wr  = b_valid && b_cmd == CMD_CFG;
-      wire matw_wr = b_valid && b_cmd == CMD_MATW;
-      // packed, not arrays: 72 x 64 is over the register-array size limit
-      logic [CFG_WORDS*64-1:0] cfg_q;
-      logic [255:0]            row_q;
-      for (genvar w = 0; w < CFG_WORDS; w++) begin : gen_cfg
-        logic [63:0] q;
-        always_ff @(posedge lane_clk)
-          if (cfg_wr && b_idx == 7'(w)) q <= b_data;
-        assign cfg_q[w*64 +: 64] = q;
-      end
-      for (genvar w = 0; w < 4; w++) begin : gen_row
-        logic [63:0] q;
-        always_ff @(posedge lane_clk)
-          if (matw_wr && b_idx[1:0] == 2'(w)) q <= b_data;
-        assign row_q[w*64 +: 64] = q;
-      end
-
-      logic [1599:0]   lc_mid_state_1, lc_mid_state_2;
-      logic [RATE-1:0] lc_msg_block;
-      logic [255:0]    lc_target;
-      logic [63:0]     lc_nonce_start;
-      logic [255:0]    lc_row;
-      assign lc_mid_state_1 = cfg_q[0*64 +: 1600];
-      assign lc_mid_state_2 = cfg_q[25*64 +: 1600];
-      assign lc_msg_block   = cfg_q[50*64 +: RATE];
-      assign lc_target      = cfg_q[67*64 +: 256];
-      assign lc_row         = row_q;
-      assign lc_nonce_start = cfg_q[71*64 +: 64] + 64'(g);
-
-      logic       lc_start, lc_stop, lc_mat_wr;
-      logic [5:0] lc_mat_addr;
-      always_ff @(posedge lane_clk) begin
-        lc_start  <= b_valid && b_cmd == CMD_CTL && b_idx[0];
-        lc_stop   <= b_valid && b_cmd == CMD_CTL && b_idx[1];
-        lc_mat_wr <= b_valid && b_cmd == CMD_MATC;
-        if (b_valid && b_cmd == CMD_MATC) lc_mat_addr <= b_idx[5:0];
-      end
-
-      logic        pipe_busy, pipe_found;
-      logic [63:0] pipe_nonce, pipe_count;
-
-      heavyhash_pipeline #(.NONCE_STEP(NUM_LANES)) u_pipe (
-        .clk         ( lane_clk       ),
-        .rst_n       ( lane_rst_n     ),
-        .start       ( lc_start       ),
-        .stop        ( lc_stop        ),
-        .busy        ( pipe_busy      ),
-        .found       ( pipe_found     ),
-        .mid_state_1 ( lc_mid_state_1 ),
-        .mid_state_2 ( lc_mid_state_2 ),
-        .msg_block   ( lc_msg_block   ),
-        .target      ( lc_target      ),
-        .nonce_start ( lc_nonce_start ),
-        .nonce_found ( pipe_nonce     ),
-        .hash_count  ( pipe_count     ),
-        .mat_wr_en   ( lc_mat_wr      ),
-        .mat_wr_addr ( lc_mat_addr    ),
-        .mat_wr_data ( lc_row         )
+      heavyhash_lane #(.NONCE_STEP(NUM_LANES)) u_lane (
+        .clk         ( lane_clk     ),
+        .rst_n       ( rst_n        ),
+        .lane_id     ( 6'(g)        ),
+        .bus_in      ( bus[g]       ),
+        .bus_out     ( bus[g+1]     ),
+        .r_found_in  ( r_found[g+1] ),
+        .r_busy_in   ( r_busy[g+1]  ),
+        .r_nonce_in  ( r_nonce[g+1] ),
+        .r_count_in  ( r_count[g+1] ),
+        .r_found_out ( r_found[g]   ),
+        .r_busy_out  ( r_busy[g]    ),
+        .r_nonce_out ( r_nonce[g]   ),
+        .r_count_out ( r_count[g]   )
       );
-
-      // ---- result chain: from lane g+1, through this lane, to lane g-1 ----
-      logic        q_found, q_busy;
-      logic [63:0] q_nonce, q_count;
-      always_ff @(posedge lane_clk or negedge lane_rst_n) begin
-        if (!lane_rst_n) begin
-          q_found <= 1'b0;
-          q_busy  <= 1'b0;
-          q_nonce <= '0;
-          q_count <= '0;
-        end else begin
-          q_found <= pipe_found | r_found[g+1];
-          q_busy  <= pipe_busy  | r_busy[g+1];
-          q_nonce <= pipe_found ? pipe_nonce : r_nonce[g+1];
-          q_count <= pipe_count + r_count[g+1];
-        end
-      end
-      assign r_found[g] = q_found;
-      assign r_busy[g]  = q_busy;
-      assign r_nonce[g] = q_nonce;
-      assign r_count[g] = q_count;
     end
   endgenerate
 

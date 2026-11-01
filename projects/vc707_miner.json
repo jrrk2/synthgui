@@ -13,6 +13,7 @@
     "{root}/projects/vc707_miner-src/keccak256.sv",
     "{root}/projects/vc707_miner-src/heavyhash_matrix.sv",
     "{root}/projects/vc707_miner-src/heavyhash_pipeline.sv",
+    "{root}/projects/vc707_miner-src/heavyhash_lane.sv",
     "{root}/projects/vc707_miner-src/heavyhash_lanes.sv",
     "{root}/projects/vc707_miner-src/mine_ctrl.sv",
     "{root}/projects/vc707_miner-src/liteeth_sgmii_phy.v",

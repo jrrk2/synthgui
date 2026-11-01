@@ -13,7 +13,7 @@ $VERILATOR --binary --timing -DTB_LANES=$LANES -j 8 -Wno-fatal -Wno-lint -Wno-st
   --top-module tb_miner --Mdir "$work/obj" -o tb_miner \
   "$here/RAMB36E1.v" \
   "$src/keccak_pkg.sv" "$src/heavyhash_pkg.sv" "$src/keccak_round.sv" "$src/keccak256.sv" \
-  "$src/heavyhash_matrix.sv" "$src/heavyhash_pipeline.sv" "$src/heavyhash_lanes.sv" \
+  "$src/heavyhash_matrix.sv" "$src/heavyhash_pipeline.sv" "$src/heavyhash_lane.sv" "$src/heavyhash_lanes.sv" \
   "$src/mine_ctrl.sv" "$src/framing_miner.sv" "$src/miner_core.sv" \
   "$here/sgmii_soc_stub.sv" "$here/tb_miner.sv" > "$work/build.log" 2>&1 \
   || { tail -30 "$work/build.log"; exit 1; }
