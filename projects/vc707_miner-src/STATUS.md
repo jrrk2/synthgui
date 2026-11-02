@@ -63,3 +63,44 @@ cdc6000, vc707_cdc_eth and vc707_ethmin miss timing in CI after the tool
 update.  Two vc707_ethmin P&R runs (old vs new Verilator netlist, same
 nextpnr) were left routing to tell whether Verilator or nextpnr is the cause;
 repeat them if their results are lost.
+
+# 2026-11-02: first full 4-lane bitstream through nextpnr's router; placement is the gap
+
+Reference: Vivado 2020.1 on the i9 places and routes the identical Verilator
+netlist (flat EDIF, `--map-only-edif-flat`) in 7 min, WNS +0.32 ns, and that
+bitstream mines on the board.  See the `vivado-reference-flow` notes: site table,
+`-o preplaced=` import of Vivado's placement.
+
+## Results
+
+| placement (same netlist)            | HPWL  | slices | DSP->adder | post-place clk_mac | routed |
+|-------------------------------------|-------|--------|------------|--------------------|--------|
+| Vivado (route.dcp)                  | 2.04M | 19.3k  | 5-10 tiles | met                | Vivado 7 min; **nextpnr 39 min, 84 passes, 99.99 MHz, mines on the board** |
+| HeAP as configured (beta 0.5)       | 3.30M | 25.9k  | 27-38      | 112 MHz            | not in 7 h (old router); new router still in pass 1 after 1.5 h |
+| HeAP beta 0.7                       | 2.79M |        |            | 147 MHz            | |
+| HeAP + DSP/BRAM site refinement     | 3.16M |        | 9-11       | 112 MHz            | |
+| `--placer static`                   | 2.45M | 20.3k  | 25-46      | 140 MHz            | |
+| static + refinement                 |       |        |            | 154 MHz            | routing on the i9 (`~/legacy4s`) |
+
+The router on Vivado's placement explores ~130 wires per arc; on HeAP's, 10x
+more.  The placer is the bottleneck, not the router.
+
+## nextpnr (deps/nextpnr)
+
+Branch `synthgui`: dense wire index + per-tile-type pip tables (router ~1.5x),
+router2 progress lines and quadtree partitions (16 threads), fixes for fully
+pinned placements, `sparse_refine.cc` (DSP/BRAM moved to the nearest free site
+minimising HPWL; `-o sparse-refine=off`).
+
+Branch `routethru` (on top): carry DI inputs on the bypass pin instead of a
+buffer LUT (`-o carry-di-bypass=off`), FF route-through legality with a chipdb
+pip into the FF mux (`-o ff-routethru=off`), 26 unit tests, and the
+`vc707_routethru` project (pinned FF pairs, LVS-proved).  Quick set passes.
+
+## Next
+
+1. Finish and route the static-placer run; if it meets 100 MHz, that is the
+   first fully open 4-lane bitstream.
+2. Place DSPs first (assignment from the analytical solution, then fix and
+   re-place the logic) if DSP->adder distance still lags Vivado.
+3. HeAP beta 0.7 as the xilinx default once validated on the quick set.
