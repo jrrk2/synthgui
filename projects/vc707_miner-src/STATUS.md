@@ -79,8 +79,11 @@ bitstream mines on the board.  See the `vivado-reference-flow` notes: site table
 | HeAP as configured (beta 0.5)       | 3.30M | 25.9k  | 27-38      | 112 MHz            | not in 7 h (old router); new router still in pass 1 after 1.5 h |
 | HeAP beta 0.7                       | 2.79M |        |            | 147 MHz            | |
 | HeAP + DSP/BRAM site refinement     | 3.16M |        | 9-11       | 112 MHz            | |
-| `--placer static`                   | 2.45M | 20.3k  | 25-46      | 140 MHz            | |
-| static + refinement                 |       |        |            | 154 MHz            | routing on the i9 (`~/legacy4s`) |
+| HeAP, no extra flags                | 2.45M | 20.3k  | 25-46      | 136-140 MHz        | routing on the i9 (`~/legacy4s`, `~/legacy4t`) |
+| ... + unmerged registers            |       |        |            | 169 MHz            | routing on the i9 (`~/legacy4u`) |
+
+`--placer static` gives the same 2.45M: the uarch's BRAM pass re-places everything with HeAP afterwards.
+The two flags the projects carried (`--placer-heap-timingweight 60 --placer-heap-congestion-spread`) cost +35% wirelength here and are dropped from projects/vc707_miner*.json.
 
 The router on Vivado's placement explores ~130 wires per arc; on HeAP's, 10x
 more.  The placer is the bottleneck, not the router.
@@ -96,6 +99,17 @@ Branch `routethru` (on top): carry DI inputs on the bypass pin instead of a
 buffer LUT (`-o carry-di-bypass=off`), FF route-through legality with a chipdb
 pip into the FF mux (`-o ff-routethru=off`), 26 unit tests, and the
 `vc707_routethru` project (pinned FF pairs, LVS-proved).  Quick set passes.
+
+## Merged registers
+
+The mapper merges the four lanes' identical matrix registers into one bank
+(4,880 flip-flops, flagged `MERGED_EQUIV`); with compact lanes a quarter of the
+nets then cross the die centre and route single-threaded (42k serial nets in
+pass 1).  Vivado's routed design replicates only 21 registers (the keccak FSM
+bits) and copes by interleaving the lanes.  nextpnr now splits any flip-flop
+whose placed sinks cluster far apart (`replicate.cc`, `-o replicate=off`), the
+copies named `<cell>$dup<n>` and proved by LVS against their originals; the
+run on the i9 (`~/legacy4v`) measures it on the flagged netlist.
 
 ## Next
 
