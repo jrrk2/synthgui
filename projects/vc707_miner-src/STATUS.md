@@ -111,10 +111,59 @@ whose placed sinks cluster far apart (`replicate.cc`, `-o replicate=off`), the
 copies named `<cell>$dup<n>` and proved by LVS against their originals; the
 run on the i9 (`~/legacy4v`) measures it on the flagged netlist.
 
+## Placement figure of merit (2026-11-03, overnight)
+
+`scripts/placement_fom.py` on the same netlist in Vivado's tile grid.  hpwl is
+x-weighted (x counts double, HeAP's weighting); over250 is the RUDY demand
+above 250 per occupied tile, averaged per cell; hot% the share of cells in
+tiles above 300.  Routing outcomes from the i9 (router2, 16 threads):
+
+| placement                          | hpwl   | long nets | hot% | over250 | pass 1       | pass 2 overused | outcome |
+|------------------------------------|--------|-----------|------|---------|--------------|-----------------|---------|
+| Vivado                             | 3.37M  | 5.5k      | 4.9  | 6.5     | 20 min, 146k | 34k             | 84-155 passes, 35-39 min, mines |
+| HeAP no flags (static placer)      | 3.55M  | 5.5k      | 8.0  | 11.8    | ~6 h, 176k   | 92k (4.5 h)     | not converging |
+| HeAP timingweight 60 + cong-spread | 4.10M  | 7.3k      | 11.2 | 15.7    | hours        |                 | not converging |
+| unmerged registers, no flags       |        |           |      |         | ~6 h, 197k   | pass 2 >9 h     | killed |
+| replication, old criterion         |        |           |      |         | ~6 h, 204k   | pass 2 >9 h     | killed |
+| OpenROAD global place, density 0.5 | 6.24M  | 14.3k     | 0.9  | 2.4     | 5 h 13, 171k | 61k nets        | running (`~/orroute`) |
+| user's topographical placer (SA)   | 9.70M  | 24.6k     | 39.1 | 44.8    | >3 h         |                 | running (`~/toporoute`) |
+| **HeAP cong-spread only**          | 3.93M  | 8.8k      | 1.7  | 2.4     | 19 min, 145k | 33.5k (1 h 45)  | pass 3 running (`~/legacy4z`) |
+| **HeAP beta 0.7 + cong-spread**    | 3.24M  | 5.8k      | 2.2  | 3.6     | 20 min, 149k | 38.3k (1 h 18)  | pass 3 running (`~/legacy4aa`) |
+
+What the table says:
+
+- Local overflow (over250, hot%) orders the outcomes among placements of
+  similar wirelength; wirelength alone does not (no-flags HeAP has nearly
+  Vivado's HPWL and does not route).  Long wires alone do not either: the
+  OpenROAD placement has the lowest overflow but 1.8x the wirelength and its
+  first pass took 5 h.  Both have to be low: the FOM is overflow at
+  Vivado-like HPWL.
+- `--placer-heap-congestion-spread` *on its own* (the project flags also
+  carried `--placer-heap-timingweight 60`, and that was the harmful one) is
+  the first nextpnr placement that behaves like Vivado's under the router:
+  pass 1 in 19 min with the same overused count, pass 2 to 33.5k.  With beta
+  0.7 as well, HPWL is below Vivado's.  Placement takes 25-38 min instead of
+  about 2 h, because the spread cells legalise quickly (HeAP beta 0.7 alone,
+  without the spread, sits in the legaliser at 600 s per iteration).
+- The user's topographical placer (System-Verilog-suite `place_lef`, built
+  with dune; stamps converted by `scripts/topo_bels2preplaced.py`) places the
+  design in 2.5 min but spreads each lane's DSPs over 8-11 columns and
+  overlaps the lanes: a bad placement by every measure, kept as the FOM's
+  far end.
+- Every nextpnr placement still leaves DSPs 27-62 tiles from their adder
+  trees (Vivado 5-10); `sparse-refine` brings that to 9-11.
+
+Scratch data: `$SCRATCH/cong/fom_all.txt` (table), `cong/*/analysis.txt`,
+`topo/{region,sa,analytic}` (the suite's placements), i9 `~/cong/timeline.txt`
+(time-stamped router passes).
+
 ## Next
 
-1. Finish and route the static-placer run; if it meets 100 MHz, that is the
-   first fully open 4-lane bitstream.
+1. If `legacy4z` / `legacy4aa` converge and meet timing: JTAG the bitstream,
+   verify mining, then make `--placer-heap-congestion-spread` (and beta 0.7)
+   the miner projects' flags, and consider the xilinx default.
 2. Place DSPs first (assignment from the analytical solution, then fix and
-   re-place the logic) if DSP->adder distance still lags Vivado.
-3. HeAP beta 0.7 as the xilinx default once validated on the quick set.
+   re-place the logic): DSP->adder distance still lags Vivado 5x.
+3. Make the congestion spread absolute rather than median-relative (the
+   prototype halves capacity above the median tile; Vivado's own placement
+   keeps over250 at 6.5 with fewer slices), and validate on the quick set.
