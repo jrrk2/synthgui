@@ -169,10 +169,14 @@ Scratch data: `$SCRATCH/cong/fom_all.txt` (table), `cong/*/analysis.txt`,
 
 ## Next
 
-1. JTAG `cong/legacy4aa/vc707_miner_90.bit` (90.9 MHz) and verify mining;
-   then make `--placer-heap-beta 0.7 --placer-heap-congestion-spread` the
-   miner projects' flags, and consider the xilinx default (quick set first).
-   LVS of the legacy4z FASM against the netlist is running locally.
+1. Done 2026-11-03: `cong/legacy4aa/vc707_miner_90.bit` mines on the board
+   (1,082 nonces, all verified); both miner projects carry
+   `--placer-heap-beta 0.7 --placer-heap-congestion-spread -o replicate=off`;
+   LVS of the legacy4z FASM against the synthesis: 79,777 proved, 0 differ,
+   0 unknown (2 h 33 min; 39,012 registers matched, clock edges and sources
+   agree).  Next: close the last 2% to 100 MHz (DSP-first placement, or a
+   timing weight that does not undo the spread), and consider the
+   congestion spread as the xilinx default after the quick set.
 2. Place DSPs first (assignment from the analytical solution, then fix and
    re-place the logic): DSP->adder distance still lags Vivado 5x.
 3. Make the congestion spread absolute rather than median-relative (the
