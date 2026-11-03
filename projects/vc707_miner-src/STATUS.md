@@ -147,7 +147,12 @@ What the table says:
   reaches 97.8 MHz in 42 passes.  Bitstreams for both, as routed (100 MHz,
   fails timing by 2-10%) and MMCM-retimed to 83.3 / 90.9 MHz
   (`scripts/mmcm_retime.py`), are in the scratchpad `cong/legacy4z`,
-  `cong/legacy4aa`, untested on the board (no FPGA overnight).  Placement takes 25-38 min instead of
+  `cong/legacy4aa`.  **Board-proven 2026-11-03 06:10:** the beta 0.7 +
+  congestion-spread bitstream at 90.9 MHz mines testnet-10 through
+  mine_daemon, 137 nonces found, 137 verified in software, 0 failed,
+  6.9 MH/s -- the first fully open-flow 4-lane miner.  Both miner projects
+  now carry `--placer-heap-beta 0.7 --placer-heap-congestion-spread
+  -o replicate=off`.  Placement takes 25-38 min instead of
   about 2 h, because the spread cells legalise quickly (HeAP beta 0.7 alone,
   without the spread, sits in the legaliser at 600 s per iteration).
 - The user's topographical placer (System-Verilog-suite `place_lef`, built

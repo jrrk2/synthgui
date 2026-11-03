@@ -52,7 +52,7 @@
   "verilator_root": "{prefix}/share/verilator",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
   "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
-  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix",
+  "nextpnr_flags": "--placer-heap-beta 0.7 --placer-heap-congestion-spread -o replicate=off --router router2 --timing-allow-fail -o hold-fix",
   "prjxray_db": "{deps}/prjxray-db",
   "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
   "sta": "{prefix}/bin/sta",
