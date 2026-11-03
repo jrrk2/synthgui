@@ -167,6 +167,29 @@ Scratch data: `$SCRATCH/cong/fom_all.txt` (table), `cong/*/analysis.txt`,
 `topo/{region,sa,analytic}` (the suite's placements), i9 `~/cong/timeline.txt`
 (time-stamped router passes).
 
+## Lane and frequency sweep (2026-11-03, i9, routethru tip, beta 0.7 + congestion-spread)
+
+Vivado routes up to 12 lanes at 125 MHz.  Netlists from the same sources
+with `LANES=N` and `MAC_DIV=8|10` (125 / 100 MHz), scratchpad `sweep/`,
+runs in `~/sweep/L<N>_M<div>` on the i9 (`queue.sh`, two at a time):
+
+| lanes | clk_mac | cells | DSPs | result |
+|---|---|---|---|---|
+| 4 | 100 | 109k | 256 | routed, 42 passes, 97.8 MHz, mines (`legacy4aa`) |
+| 4 | 125 | 109k | 256 | **identical** to the 100 MHz run pass for pass: 97.8 MHz, 2 h 50 |
+| 6 | 100 | 150k | 384 | running |
+| 8 | 100 | 194k | 512 | **stuck in pass 1**: parallel phases done in 1 h, then the serial phase (82k nets crossing both midlines) routed 1.4k nets in 2.3 h with the search climbing to 1.2k wires/arc; killed |
+| 12 | 100 | 279k | 768 | running (HeAP iteration 1 took 13 min) |
+| 8, 12 | 125 | | | skipped: a 125 MHz netlist places and routes exactly as the 100 MHz one |
+
+The frequency axis is degenerate: HeAP's and router2's timing weighting is
+relative, so the constraint changes nothing and the open flow delivers
+~98 MHz at 4 lanes whatever is asked.  The lane threshold with this
+configuration is between 4 and 8: at 8 the merged matrix bank fanning out to
+eight compact lanes puts the die-centre crossing beyond what the congestion
+spread relieves.  Remedies to try at 8 lanes: `replicate` with the fixed
+threshold (split the bank per lane) and `-o macro-region` per lane.
+
 ## Next
 
 1. Done 2026-11-03: `cong/legacy4aa/vc707_miner_90.bit` mines on the board
