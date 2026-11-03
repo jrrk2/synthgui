@@ -177,9 +177,9 @@ runs in `~/sweep/L<N>_M<div>` on the i9 (`queue.sh`, two at a time):
 |---|---|---|---|---|
 | 4 | 100 | 109k | 256 | routed, 42 passes, 97.8 MHz, mines (`legacy4aa`) |
 | 4 | 125 | 109k | 256 | **identical** to the 100 MHz run pass for pass: 97.8 MHz, 2 h 50 |
-| 6 | 100 | 150k | 384 | running |
+| 6 | 100 | 150k | 384 | abandoned 2 min after it started |
 | 8 | 100 | 194k | 512 | **stuck in pass 1**: parallel phases done in 1 h, then the serial phase (82k nets crossing both midlines) routed 1.4k nets in 2.3 h with the search climbing to 1.2k wires/arc; killed |
-| 12 | 100 | 279k | 768 | running (HeAP iteration 1 took 13 min) |
+| 12 | 100 | 279k | 768 | abandoned in HeAP (iteration 1 took 13 min) |
 | 8, 12 | 125 | | | skipped: a 125 MHz netlist places and routes exactly as the 100 MHz one |
 
 The frequency axis is degenerate: HeAP's and router2's timing weighting is
@@ -187,8 +187,11 @@ relative, so the constraint changes nothing and the open flow delivers
 ~98 MHz at 4 lanes whatever is asked.  The lane threshold with this
 configuration is between 4 and 8: at 8 the merged matrix bank fanning out to
 eight compact lanes puts the die-centre crossing beyond what the congestion
-spread relieves.  Remedies to try at 8 lanes: `replicate` with the fixed
-threshold (split the bank per lane) and `-o macro-region` per lane.
+spread relieves.  **The lane expansion was abandoned at this point (user
+decision, 2026-11-03 10:18)**; the 4-lane design stays the test vehicle.
+If it is ever resumed, the remedies to try at 8 lanes are `replicate`
+with the fixed threshold (split the bank per lane) and `-o macro-region`
+per lane.
 
 ## Next
 
