@@ -127,8 +127,8 @@ tiles above 300.  Routing outcomes from the i9 (router2, 16 threads):
 | replication, old criterion         |        |           |      |         | ~6 h, 204k   | pass 2 >9 h     | killed |
 | OpenROAD global place, density 0.5 | 6.24M  | 14.3k     | 0.9  | 2.4     | 5 h 13, 171k | 61k nets        | running (`~/orroute`) |
 | user's topographical placer (SA)   | 9.70M  | 24.6k     | 39.1 | 44.8    | >3 h         |                 | running (`~/toporoute`) |
-| **HeAP cong-spread only**          | 3.93M  | 8.8k      | 1.7  | 2.4     | 19 min, 145k | 33.5k (1 h 45)  | pass 3 running (`~/legacy4z`) |
-| **HeAP beta 0.7 + cong-spread**    | 3.24M  | 5.8k      | 2.2  | 3.6     | 20 min, 149k | 38.3k (1 h 18)  | pass 3 running (`~/legacy4aa`) |
+| **HeAP cong-spread only**          | 3.93M  | 8.8k      | 1.7  | 2.4     | 19 min, 145k | 33.5k (1 h 45)  | **routed: 9 passes, 2 h 59 total, 90.6 MHz** (`~/legacy4z`) |
+| **HeAP beta 0.7 + cong-spread**    | 3.24M  | 5.8k      | 2.2  | 3.6     | 20 min, 149k | 38.3k (1 h 18)  | **routed: 42 passes, 3 h 08 total, 97.8 MHz** (`~/legacy4aa`) |
 
 What the table says:
 
@@ -141,8 +141,13 @@ What the table says:
 - `--placer-heap-congestion-spread` *on its own* (the project flags also
   carried `--placer-heap-timingweight 60`, and that was the harmful one) is
   the first nextpnr placement that behaves like Vivado's under the router:
-  pass 1 in 19 min with the same overused count, pass 2 to 33.5k.  With beta
-  0.7 as well, HPWL is below Vivado's.  Placement takes 25-38 min instead of
+  pass 1 in 19 min with the same overused count, pass 2 to 33.5k, zero
+  overuse after 9 passes: **the first fully open 4-lane route**, clk_mac
+  90.6 MHz.  With beta 0.7 as well, HPWL is below Vivado's and the route
+  reaches 97.8 MHz in 42 passes.  Bitstreams for both, as routed (100 MHz,
+  fails timing by 2-10%) and MMCM-retimed to 83.3 / 90.9 MHz
+  (`scripts/mmcm_retime.py`), are in the scratchpad `cong/legacy4z`,
+  `cong/legacy4aa`, untested on the board (no FPGA overnight).  Placement takes 25-38 min instead of
   about 2 h, because the spread cells legalise quickly (HeAP beta 0.7 alone,
   without the spread, sits in the legaliser at 600 s per iteration).
 - The user's topographical placer (System-Verilog-suite `place_lef`, built
@@ -159,9 +164,10 @@ Scratch data: `$SCRATCH/cong/fom_all.txt` (table), `cong/*/analysis.txt`,
 
 ## Next
 
-1. If `legacy4z` / `legacy4aa` converge and meet timing: JTAG the bitstream,
-   verify mining, then make `--placer-heap-congestion-spread` (and beta 0.7)
-   the miner projects' flags, and consider the xilinx default.
+1. JTAG `cong/legacy4aa/vc707_miner_90.bit` (90.9 MHz) and verify mining;
+   then make `--placer-heap-beta 0.7 --placer-heap-congestion-spread` the
+   miner projects' flags, and consider the xilinx default (quick set first).
+   LVS of the legacy4z FASM against the netlist is running locally.
 2. Place DSPs first (assignment from the analytical solution, then fix and
    re-place the logic): DSP->adder distance still lags Vivado 5x.
 3. Make the congestion spread absolute rather than median-relative (the
