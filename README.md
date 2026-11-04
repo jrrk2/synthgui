@@ -170,10 +170,12 @@ The tools the flow calls are submodules under `deps/`:
 | `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; prjxray's `xc7frames2bit` makes the bitstream from the frames the built-in `fasm2frames` writes |
 | `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
 
+See [docs/vc707-rv32gc-onchip.md](docs/vc707-rv32gc-onchip.md) for the RV32GC harness that routes and loads its own window, and how its CPU configuration was chosen.
+
 ### Built-in tools
 
 The converters between the big tools are part of synthgui, so the flow runs without Python: a step's command names
-one as `@name` (project variables `{fasm2frames}`, `{bit2uf2}`, `{sta_prep}`, `{bram_fom}`) and synthgui runs it in a worker
+one as `@name` (project variables `{fasm2frames}`, `{bit2uf2}`, `{sta_prep}`, `{bram_fom}`, `{pr_partial}`, `{pr_block_json}`, `{pin_cells}`, `{at_gen}`, `{at_decode}`) and synthgui runs it in a worker
 thread, its output going to the step's log. Commands before and after it in a `&&` chain run through bash as before. The
 programs with their own maintainers (verilator, nextpnr, OpenSTA, prjxray's `xc7frames2bit`, fasm2netlist, openFPGALoader)
 stay separate executables, started as processes.
@@ -184,10 +186,21 @@ stay separate executables, started as processes.
 | `bit2uf2` (`tools/bit2uf2/`) | wraps a bitstream in UF2 blocks for the Sonata board's SONATA drive | `xc7/bit2uf2.py` |
 | `sta-prep` (`tools/sta_prep/`) | nextpnr's routed JSON and SDF to a Liberty file, a Verilog netlist and the Tcl `sta` reads | `sta/nextpnr_sta.py` |
 | `bram-fom` (`tools/bram_fom/`) | the block RAM figure of merit | `deps/nextpnr/.github/scripts/bram_fom.py` |
+| `pr-partial` (`tools/pr_partial/`) | partial reconfiguration: `merge` a window's FASM into the harness's, `extract` the ICAPE2 image from the merged frames; `prep` (a harness's trimmed tile grid, base FASM, row description and trimmed database) and `extract --row` (the image with no tilegrid, for a small board) came from prototypes | `xc7/pr_partial.py` (merge, extract); the fast path against the full `extract`'s image |
+| `pr-block-json` (`tools/pr_block_json/`) | netlist surgery for a window: `merge` a block into the harness, `window` the block alone with its partition pins and `--reserve` list | `xc7/pr_block_json.py` |
+| `pin-cells` (`tools/pin_cells/`) | gives cells of a netlist BEL attributes | `xc7/pin_cells.py` |
+| `at-gen` (`tools/at_gen/`) | generates an at-speed test block as a netlist, by path depths | `xc7/at_gen.py` |
+| `at-decode` (`tools/at_decode/`) | decodes an at-speed block's LFSR counter states to counts | `xc7/at_decode.py` |
 
 Each is also a command, `build/synthgui --tool NAME args`, for scripts and for the checks: `tools/*/compare.sh` runs the
 Python original and the tool on the same inputs and compares the outputs byte for byte (every FASM, netlist and placement
 in `~/synthgui-work` gave identical results, on Artix-7 and Virtex-7). The Python files stay in the tree as the reference.
+
+`tools/pr_partial/compare.sh` does the same for the partial-reconfiguration tools together, on a harness and a window build
+from a run directory. `tools/build-standalone.sh OUTDIR [TOOL...]` builds these and `fasm2frames` as programs of their own,
+without Qt (`CXX=...rv32g-g++` for an RV32 board, where no interpreter is acceptable). `xc7/at_sweep.py` and the other host
+console and network helpers in `xc7/` (`bios_cmd.py`, `bios_catch.py`, `sfl_upload.py`, `tftp_serve.py`) are not flow
+converters and stay Python.
 
 The Xilinx primitive models Verilator reads as cell stubs, and that the
 mapped Verilog simulates against, are `xc7/cells_sim.v` and

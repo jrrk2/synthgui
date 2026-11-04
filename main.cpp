@@ -85,6 +85,11 @@ int fasm2frames_main(int argc, char** argv);
 int bit2uf2_main(int argc, char** argv);
 int sta_prep_main(int argc, char** argv);
 int bram_fom_main(int argc, char** argv);
+int pr_partial_main(int argc, char** argv);
+int pr_block_json_main(int argc, char** argv);
+int pin_cells_main(int argc, char** argv);
+int at_gen_main(int argc, char** argv);
+int at_decode_main(int argc, char** argv);
 
 // ---------------------------------------------------------------- project
 
@@ -201,7 +206,7 @@ struct Project {
         vars["sdf"] = work + "/" + top + ".sdf";
         vars["xdc"] = xdc;
         // the tools built into this program (tools/) are run in-process: a step's command names one as @name
-        for (const char* tool : {"fasm2frames", "bit2uf2", "sta_prep", "bram_fom"})
+        for (const char* tool : {"fasm2frames", "bit2uf2", "sta_prep", "bram_fom", "pr_partial", "pr_block_json", "pin_cells", "at_gen", "at_decode"})
             if (!vars.contains(tool)) vars[tool] = QString("@") + tool;
         if (!vars.contains("frames2bit")) vars["frames2bit"] = repoRoot() + "/build-deps/prjxray/tools/xc7frames2bit";
         // commands run through bash: quote anything the shell would read (32'h... in a define)
@@ -866,7 +871,8 @@ private:
 
 // ---------------------------------------------------------------- built-in tools
 // The converters in tools/ run inside this process, in a worker thread, with their output going to the step's log. A step's
-// command names one as @name (the project variables {fasm2frames}, {bit2uf2}, {sta_prep}, {bram_fom} expand to that) and
+// command names one as @name (the project variables {fasm2frames}, {bit2uf2}, {sta_prep}, {bram_fom}, {pr_partial},
+// {pr_block_json}, {pin_cells}, {at_gen}, {at_decode} expand to that) and
 // may chain it with && to other commands; the commands around it are run by bash as before, and a command that names
 // none is passed to bash untouched.
 namespace {
@@ -987,6 +993,11 @@ int runBuiltinTool(const QString& name, const QStringList& args) {
     else if (name == "bit2uf2") fn = bit2uf2_main;
     else if (name == "sta-prep") fn = sta_prep_main;
     else if (name == "bram-fom") fn = bram_fom_main;
+    else if (name == "pr-partial") fn = pr_partial_main;
+    else if (name == "pr-block-json") fn = pr_block_json_main;
+    else if (name == "pin-cells") fn = pin_cells_main;
+    else if (name == "at-gen") fn = at_gen_main;
+    else if (name == "at-decode") fn = at_decode_main;
     if (!fn) {
         toolio::err("synthgui: no built-in tool '%s'\n", name.toLocal8Bit().constData());
         return 127;
@@ -1955,7 +1966,12 @@ int main(int argc, char** argv) {
         if (!strcmp(tool, "bit2uf2")) return bit2uf2_main(targc, targv);
         if (!strcmp(tool, "sta-prep")) return sta_prep_main(targc, targv);
         if (!strcmp(tool, "bram-fom")) return bram_fom_main(targc, targv);
-        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom)\n", tool);
+        if (!strcmp(tool, "pr-partial")) return pr_partial_main(targc, targv);
+        if (!strcmp(tool, "pr-block-json")) return pr_block_json_main(targc, targv);
+        if (!strcmp(tool, "pin-cells")) return pin_cells_main(targc, targv);
+        if (!strcmp(tool, "at-gen")) return at_gen_main(targc, targv);
+        if (!strcmp(tool, "at-decode")) return at_decode_main(targc, targv);
+        fprintf(stderr, "synthgui: no built-in tool '%s' (fasm2frames, bit2uf2, sta-prep, bram-fom, pr-partial, pr-block-json, pin-cells, at-gen, at-decode)\n", tool);
         return 2;
     }
     QApplication app(argc, argv);
