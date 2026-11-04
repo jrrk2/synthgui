@@ -1,3 +1,5 @@
+<img width="1499" height="977" alt="image" src="https://github.com/user-attachments/assets/f0badad8-57f2-4441-ab8c-5f18f1fe7586" />
+
 # synthgui -- proof of concept for an open FPGA flow GUI
 
 A Qt 6 Widgets front end for the verilator synthesis flow:
