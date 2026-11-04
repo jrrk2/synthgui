@@ -5,3 +5,6 @@ build-deps/
 build-release/
 __pycache__/
 ci-work/
+
+# run outputs and logs, one folder per experiment (see STATUS.md)
+runs/
