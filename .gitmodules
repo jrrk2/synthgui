@@ -5,7 +5,7 @@
 	ignore = dirty
 [submodule "deps/prjxray-db"]
 	path = deps/prjxray-db
-	url = https://github.com/openXC7/prjxray-db.git
+	url = https://github.com/jrrk2/prjxray-db.git
 [submodule "deps/OpenSTA"]
 	path = deps/OpenSTA
 	url = https://github.com/jrrk2/OpenSTA.git
