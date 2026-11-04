@@ -1,0 +1,44 @@
+diff --git a/litex/soc/cores/cpu/vexriscv_smp/core.py b/litex/soc/cores/cpu/vexriscv_smp/core.py
+index 80fb535c3..13f790af6 100755
+--- a/litex/soc/cores/cpu/vexriscv_smp/core.py
++++ b/litex/soc/cores/cpu/vexriscv_smp/core.py
+@@ -59,6 +59,7 @@ class VexRiscvSMP(CPU):
+     jtag_tap             = False
+     dtlb_size            = 4
+     itlb_size            = 4
++    prediction           = "none"
+     csr_base             = 0xf000_0000
+     clint_base           = 0xf001_0000
+     plic_base            = 0xf0c0_0000
+@@ -87,6 +88,7 @@ class VexRiscvSMP(CPU):
+         cpu_group.add_argument("--cpu-per-fpu",                  default="4",          help="Maximal ratio between CPU count and FPU count. Will instanciate as many FPU as necessary.")
+         cpu_group.add_argument("--with-rvc",                     action="store_true",  help="Enable RISC-V compressed instruction support")
+         cpu_group.add_argument("--dtlb-size",                    default=4,            help="Data TLB size.")
++        cpu_group.add_argument("--prediction",                   default="none",       help="Branch prediction: none, static, dynamic, dynamic_target.")
+         cpu_group.add_argument("--itlb-size",                    default=4,            help="Instruction TLB size.")
+         cpu_group.add_argument("--expose-time",                  action="store_true",  help="Add CLINT time output.")
+         cpu_group.add_argument("--csr-base",                     default="0xf0000000", help="CSR base address.")
+@@ -130,6 +132,7 @@ class VexRiscvSMP(CPU):
+             VexRiscvSMP.with_rvc = True
+         if(args.dtlb_size):  VexRiscvSMP.dtlb_size  = int(args.dtlb_size)
+         if(args.itlb_size):  VexRiscvSMP.itlb_size  = int(args.itlb_size)
++        VexRiscvSMP.prediction = args.prediction
+         if(args.csr_base):   VexRiscvSMP.csr_base   = int(args.csr_base, 16)
+         if(args.clint_base): VexRiscvSMP.clint_base = int(args.clint_base, 16)
+         if(args.plic_base):  VexRiscvSMP.plic_base  = int(args.plic_base, 16)
+@@ -202,6 +205,7 @@ class VexRiscvSMP(CPU):
+         f"{'_Time'  if VexRiscvSMP.expose_time      else ''}" \
+         f"{'_Ood'  if VexRiscvSMP.out_of_order_decoder else ''}" \
+         f"{'_Wm'   if VexRiscvSMP.wishbone_memory      else ''}" \
++        f"{'_P'+VexRiscvSMP.prediction if VexRiscvSMP.prediction != 'none' else ''}" \
+         f"{'_Wf32' if VexRiscvSMP.wishbone_force_32b   else ''}" \
+         f"{'_Fpu' + str(VexRiscvSMP.cpu_per_fpu)  if VexRiscvSMP.with_fpu else ''}" \
+         f"{'_Pd'   if VexRiscvSMP.privileged_debug else ''}" \
+@@ -316,6 +320,7 @@ class VexRiscvSMP(CPU):
+         gen_args.append(f"--netlist-directory={netlist_directory}")
+         gen_args.append(f"--dtlb-size={VexRiscvSMP.dtlb_size}")
+         gen_args.append(f"--itlb-size={VexRiscvSMP.itlb_size}")
++        gen_args.append(f"--prediction={VexRiscvSMP.prediction}")
+         gen_args.append(f"--jtag-tap={VexRiscvSMP.jtag_tap}")
+ 
+         cmd = 'cd {path} && sbt "runMain vexriscv.demo.smp.VexRiscvLitexSmpClusterCmdGen {args}"'.format(path=os.path.join(vdir, "ext", "VexRiscv"), args=" ".join(gen_args))
