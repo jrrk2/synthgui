@@ -48,6 +48,8 @@ for prefix in at_block. at_block; do
 done
 run window "xc7/pr_block_json.py window --block $BLOCK --harness $HARNESS --instance at_block --interface $IFACE --map $WMAP --prefix at_block. --out \$d/py/window.json --reserve \$d/py/reserve.txt" \
     pr-block-json "window --block $BLOCK --harness $HARNESS --instance at_block --interface $IFACE --map $WMAP --prefix at_block. --out \$d/cpp/window.json --reserve \$d/cpp/reserve.txt" window.json reserve.txt
+run window-static "xc7/pr_block_json.py window --block $BLOCK --harness $HARNESS --instance at_block --interface $IFACE --map $WMAP --prefix at_block. --out \$d/py/window.json --reserve \$d/py/reserve.txt --static-fasm $HFASM --tilegrid $TG --window $WIN" \
+    pr-block-json "window --block $BLOCK --harness $HARNESS --instance at_block --interface $IFACE --map $WMAP --prefix at_block. --out \$d/cpp/window.json --reserve \$d/cpp/reserve.txt --static-fasm $HFASM --tilegrid $TG --window $WIN" window.json reserve.txt
 run window-noinst "xc7/pr_block_json.py window --block $BLOCK --harness $HARNESS --instance no_such_cell --interface $IFACE --map $WMAP --prefix x --out \$d/py/w.json" \
     pr-block-json "window --block $BLOCK --harness $HARNESS --instance no_such_cell --interface $IFACE --map $WMAP --prefix x --out \$d/cpp/w.json"
 
@@ -72,6 +74,10 @@ run pr-merge "xc7/pr_partial.py --tilegrid $TG --window $WIN merge $HFASM $WFASM
     pr-partial "--tilegrid $TG --window $WIN merge $HFASM $WFASM \$d/cpp/merged.fasm" merged.fasm
 merged=$tmp/pr-merge/py/merged.fasm
 if [ -f "$merged" ]; then
+    run pr-check "xc7/pr_partial.py check $merged --map $WMAP" pr-partial "check $merged --map $WMAP"
+    # the same design with a second driver on a boundary node: both must refuse it
+    awk -F. 'BEGIN{d=0} {print} !d && /^INT_/ && NF==3 {print $1"."$2".GND_WIRE"; d=1}' "$merged" >"$tmp/short.fasm"
+    run pr-check-short "xc7/pr_partial.py check $tmp/short.fasm --map $WMAP" pr-partial "check $tmp/short.fasm --map $WMAP"
     "$cpp" --tool fasm2frames --part "$PART" --db-root "$DB" "$merged" "$tmp/merged.frames"
     run pr-extract "xc7/pr_partial.py --tilegrid $TG --window $WIN extract $tmp/merged.frames \$d/py/w.icap --ref $HFRAMES --frames-out \$d/py/w.frames" \
         pr-partial "--tilegrid $TG --window $WIN extract $tmp/merged.frames \$d/cpp/w.icap --ref $HFRAMES --frames-out \$d/cpp/w.frames" w.icap w.frames

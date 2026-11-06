@@ -8,9 +8,12 @@
 //                                 --map window-map.json --prefix at_block. --out W.json [--reserve reserve.txt]
 //     The block alone as a top-level design for the window chipdb: each port becomes a PARTPIN_IN (input) or PARTPIN_OUT
 //     (output) cell pinned (BEL attribute) to the boundary node the harness build reported for that port's net in its
-//     -o pr-interface file, looked up in the window chipdb's --window-map.
+//     -o pr-interface file, looked up in the window chipdb's --window-map.  With --static-fasm --tilegrid --window, the reserve
+//     file also lists every boundary node the harness drives from outside the window, whether or not its net enters it.
 #include <cstdint>
+#include <cstdio>
 #include <exception>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -287,9 +290,40 @@ static int cmd_window(const pycompat::Args& a) {
                 const string& bel = nodes.at(canon->s()).at("in").s();
                 if (!taken.count(bel) && listed.insert(bel).second) { text += bel; text += '\n'; reserved++; }
             }
+        // a static net that only runs along a wire overhanging the window is not in the interface file, yet driving that wire
+        // from inside the window is a short
+        const string static_fasm = a.get("--static-fasm");
+        size_t static_nodes = 0;
+        if (!static_fasm.empty()) {
+            V grid = pycompat::load(a.get("--tilegrid"));
+            int64_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            if (sscanf(a.get("--window").c_str(), "%ld,%ld,%ld,%ld", &x0, &y0, &x1, &y1) != 4) die("--window: expected x0,y0,x1,y1");
+            std::set<string> found;
+            string ftext = pycompat::read_file(static_fasm);
+            pycompat::for_each_line(ftext, [&](std::string_view raw) {
+                std::string_view s = pycompat::strip(raw);
+                size_t d1 = s.find('.');
+                if (d1 == std::string_view::npos) return;
+                size_t d2 = s.find('.', d1 + 1);
+                if (d2 == std::string_view::npos || s.find('.', d2 + 1) != std::string_view::npos) return;
+                const string tile(s.substr(0, d1));
+                const V* t = grid.o().find(tile);
+                if (!t) return;
+                const int64_t x = t->at("grid_x").as_int(), y = t->at("grid_y").as_int();
+                if (x0 <= x && x <= x1 && y0 <= y && y <= y1) return;   // the placeholder's own routes in the window: replaced
+                const V* canon = wires.find(tile + "/" + string(s.substr(d1 + 1, d2 - d1 - 1)));
+                if (!canon || canon->type() == V::Null) return;
+                const string& bel = nodes.at(canon->s()).at("in").s();
+                if (!taken.count(bel) && !listed.count(bel)) found.insert(bel);
+            });
+            text += "# boundary nodes the static design drives with no consumer in the window\n";
+            for (const string& bel : found) { text += bel; text += '\n'; }
+            static_nodes = found.size();
+        }
         pycompat::write_file(reserve, text);
         string tail = unknown ? " (" + std::to_string(unknown) + " crossing wires not in the window map)" : "";
         toolio::out("window: %zu driven nodes reserved -> %s%s\n", reserved, reserve.c_str(), tail.c_str());
+        if (!static_fasm.empty()) toolio::out("window: %zu more boundary nodes reserved from %s\n", static_nodes, static_fasm.c_str());
     }
     toolio::out("window: %zu cells, %zu partition pins -> %s\n", wcells.size(), pinned, out_path.c_str());
     return 0;
@@ -298,11 +332,11 @@ static int cmd_window(const pycompat::Args& a) {
 static const char* const USAGE =
     "usage: pr-block-json merge --harness H.json --block B.json --instance NAME --prefix PREFIX --out M.json\n"
     "       pr-block-json window --block B.json --harness H.json --instance NAME --interface FILE --map window-map.json\n"
-    "                            --prefix PREFIX --out W.json [--reserve FILE]\n";
+    "                            --prefix PREFIX --out W.json [--reserve FILE [--static-fasm H.fasm --tilegrid T --window x0,y0,x1,y1]]\n";
 
 int tool_main(int argc, char** argv) {
     try {
-        pycompat::Args a = pycompat::parse_args(argc, argv, {"--harness", "--block", "--instance", "--prefix", "--out", "--interface", "--map", "--reserve"});
+        pycompat::Args a = pycompat::parse_args(argc, argv, {"--harness", "--block", "--instance", "--prefix", "--out", "--interface", "--map", "--reserve", "--static-fasm", "--tilegrid", "--window"});
         if (a.help) { toolio::out("%s", USAGE); return 0; }
         const string cmd = a.pos.empty() ? string() : a.pos[0];
         vector<string> need = {"--harness", "--block", "--instance", "--prefix", "--out"};
@@ -310,6 +344,8 @@ int tool_main(int argc, char** argv) {
         bool ok = a.pos.size() == 1 && (cmd == "merge" || cmd == "window");
         for (const string& n : need) if (!a.has(n)) ok = false;
         if (!ok) { toolio::err("%s", USAGE); return 2; }
+        if (cmd == "window" && a.has("--static-fasm") && !(a.has("--reserve") && a.has("--tilegrid") && a.has("--window")))
+            die("--static-fasm needs --reserve, --tilegrid and --window");
         return cmd == "merge" ? cmd_merge(a) : cmd_window(a);
     } catch (std::exception& e) {
         toolio::err("pr_block_json: %s\n", e.what());

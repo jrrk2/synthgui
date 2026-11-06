@@ -14,6 +14,7 @@ knows exactly which cells belong in the window.
 
   window  --block B.json --harness H.json --instance at_block --interface harness.pri
           --map window-map.json --prefix at_block. --out W.json
+          [--reserve reserve.txt [--static-fasm H.fasm --tilegrid T --window x0,y0,x1,y1]]
           The block alone as a top-level design for the window chipdb: each
           port becomes a PARTPIN_IN (input) or PARTPIN_OUT (output) cell
           pinned (BEL attribute) to the boundary node the harness build
@@ -183,12 +184,41 @@ def cmd_window(args):
                 bel = wmap["nodes"][canon]["in"]
                 if bel not in taken and bel not in reserved:
                     reserved.append(bel)
+        # a static net that only runs along a wire overhanging the window is not in the
+        # interface file, yet driving that wire from inside the window is a short
+        static = []
+        if args.static_fasm:
+            tiles = json.load(open(args.tilegrid))
+            x0, y0, x1, y1 = [int(v) for v in args.window.split(",")]
+            have = set(reserved)
+            found = set()
+            with open(args.static_fasm) as f:
+                for line in f:
+                    parts = line.strip().split(".")
+                    if len(parts) != 3 or parts[0] not in tiles:
+                        continue
+                    t = tiles[parts[0]]
+                    if x0 <= t["grid_x"] <= x1 and y0 <= t["grid_y"] <= y1:
+                        continue  # the placeholder's own routes in the window: replaced
+                    canon = wmap["wires"].get(parts[0] + "/" + parts[1])
+                    if canon is None:
+                        continue
+                    bel = wmap["nodes"][canon]["in"]
+                    if bel not in taken and bel not in have:
+                        found.add(bel)
+            static = sorted(found)
         with open(args.reserve, "w") as f:
             f.write("# nodes the static design drives into the window, beyond the partition pins\n")
             for bel in reserved:
                 f.write(bel + "\n")
+            if args.static_fasm:
+                f.write("# boundary nodes the static design drives with no consumer in the window\n")
+                for bel in static:
+                    f.write(bel + "\n")
         print("window: %d driven nodes reserved -> %s%s" %
               (len(reserved), args.reserve, " (%d crossing wires not in the window map)" % unknown if unknown else ""))
+        if args.static_fasm:
+            print("window: %d more boundary nodes reserved from %s" % (len(static), args.static_fasm))
     print("window: %d cells, %d partition pins -> %s" % (len(W["cells"]), pinned, args.out))
 
 
@@ -210,7 +240,12 @@ def main():
     w.add_argument("--prefix", required=True)
     w.add_argument("--out", required=True)
     w.add_argument("--reserve", help="write the bels of the other driven boundary nodes here (nextpnr -o pr-reserve)")
+    w.add_argument("--static-fasm", help="the harness FASM: also reserve every boundary node it drives from outside the window")
+    w.add_argument("--tilegrid", help="with --static-fasm")
+    w.add_argument("--window", help="with --static-fasm: x0,y0,x1,y1")
     args = p.parse_args()
+    if args.cmd == "window" and args.static_fasm and not (args.reserve and args.tilegrid and args.window):
+        sys.exit("--static-fasm needs --reserve, --tilegrid and --window")
     if args.cmd == "merge":
         cmd_merge(args)
     else:

@@ -232,7 +232,47 @@ def cmd_extract(args):
                                              "; no frame outside the window differs from the reference" if ref else ""))
 
 
+def cmd_check(args):
+    """Two drivers on one wire of the merged design.  Across tiles only the nodes
+    in the window map are known, which is every node that crosses the window's
+    edge, the only ones a harness and a window can both drive; nodes wholly inside
+    the window are checked by tile and wire alone."""
+    wires = json.load(open(args.map))["wires"]
+    drivers = {}
+    pips = 0
+    with open(args.merged) as f:
+        for line in f:
+            s = line.strip()
+            parts = s.split(".")
+            if len(parts) != 3:
+                continue
+            key = parts[0] + "/" + parts[1]
+            canon = wires.get(key)
+            if canon is not None:
+                drivers.setdefault(canon, set()).add(s)
+            elif parts[0].startswith("INT_"):
+                drivers.setdefault(key, set()).add(s)
+            else:
+                continue
+            pips += 1
+    bad = 0
+    for k in sorted(drivers):
+        if len(drivers[k]) > 1:
+            bad += 1
+            print("  %s: %s" % (k, ", ".join(sorted(drivers[k]))))
+    print("check: %d pips onto %d wires, %d with two or more drivers" % (pips, len(drivers), bad))
+    if bad:
+        sys.exit("pr_partial: a node has two drivers: this design has a short, no image")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "check":
+        p = argparse.ArgumentParser(description="pr_partial.py check merged.fasm --map window-map.json")
+        p.add_argument("cmd")
+        p.add_argument("merged")
+        p.add_argument("--map", required=True)
+        cmd_check(p.parse_args())
+        return
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--tilegrid", required=True, help="prjxray tilegrid.json of the device")
     p.add_argument("--window", required=True, help="x0,y0,x1,y1 tile grid rectangle, as given to the chipdb generator")

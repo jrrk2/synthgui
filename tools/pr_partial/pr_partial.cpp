@@ -4,6 +4,7 @@
 //   synthgui --tool pr-partial --tilegrid tilegrid.json --window x0,y0,x1,y1 merge harness.fasm window.fasm merged.fasm
 //   synthgui --tool pr-partial --tilegrid tilegrid.json --window x0,y0,x1,y1 extract merged.frames out.icap
 //                              [--ref harness.frames] [--idcode 0x03687093] [--frames-out window.frames]
+//   synthgui --tool pr-partial check merged.fasm --map window-map.json      exit 1 if a wire has two drivers
 //
 // A window of the device (a rectangle of the prjxray tile grid that covers whole frame columns of one clock-region row, and
 // ends the row) is built on its own window chipdb around a static design built with `-o pr-window`; its frames are the only
@@ -239,6 +240,43 @@ static int cmd_merge(const string& tilegrid, const string& window, const vector<
     if (out.empty()) out = "\n";                                // "\n".join([]) + "\n"
     pycompat::write_file(pos[3], out);
     toolio::out("merge: %zu harness lines in the window dropped, %zu window lines added, %zu lines written\n", dropped, added, lines);
+    return 0;
+}
+
+// ---------------------------------------------------------------- check
+// Two drivers on one wire of the merged design.  Across tiles only the nodes in the window map are known, which is every node
+// that crosses the window's edge, the only ones a harness and a window can both drive; nodes wholly inside the window are
+// checked by tile and wire alone, so two tiles driving one interior node are not seen here.
+static int cmd_check(const vector<string>& pos, const string& map_path) {
+    if (pos.size() != 2 || map_path.empty()) die("usage: pr-partial check merged.fasm --map window-map.json");
+    V wmap = pycompat::load(map_path);
+    const pycompat::Object& wires = wmap.at("wires").o();
+    std::map<string, std::set<string>> drivers;
+    size_t pips = 0;
+    string text = pycompat::read_file(pos[1]);
+    pycompat::for_each_line(text, [&](string_view raw) {
+        string_view s = pycompat::strip(raw);
+        size_t d1 = s.find('.');
+        if (d1 == string_view::npos) return;
+        size_t d2 = s.find('.', d1 + 1);
+        if (d2 == string_view::npos || s.find('.', d2 + 1) != string_view::npos) return;
+        const string wire(s.substr(0, d1)); const string key = wire + "/" + string(s.substr(d1 + 1, d2 - d1 - 1));
+        const V* canon = wires.find(key);
+        if (canon && canon->type() != V::Null) drivers[canon->s()].insert(string(s));
+        else if (wire.compare(0, 4, "INT_") == 0) drivers[key].insert(string(s));
+        else return;
+        pips++;
+    });
+    size_t bad = 0;
+    for (const auto& kv : drivers) {
+        if (kv.second.size() < 2) continue;
+        bad++;
+        string list;
+        for (const string& d : kv.second) { if (!list.empty()) list += ", "; list += d; }
+        toolio::out("  %s: %s\n", kv.first.c_str(), list.c_str());
+    }
+    toolio::out("check: %zu pips onto %zu wires, %zu with two or more drivers\n", pips, drivers.size(), bad);
+    if (bad) die("a node has two drivers: this design has a short, no image");
     return 0;
 }
 
@@ -567,15 +605,17 @@ static int cmd_prep(const string& tilegrid, const string& window, const vector<s
 
 static const char* const USAGE =
     "usage: pr-partial --tilegrid TILEGRID --window x0,y0,x1,y1 merge harness.fasm window.fasm out.fasm\n"
+    "       pr-partial check merged.fasm --map window-map.json\n"
     "       pr-partial --tilegrid TILEGRID --window x0,y0,x1,y1 extract frames out.icap [--ref FRAMES] [--idcode ID] [--frames-out F]\n"
     "       pr-partial extract frames out.icap --row row.txt [--idcode ID] [--frames-out F]\n"
     "       pr-partial --tilegrid TILEGRID --window x0,y0,x1,y1 prep harness.fasm OUTDIR [--db-root DB/FAMILY --part PART [--minidb DIR]]\n";
 
 int tool_main(int argc, char** argv) {
     try {
-        pycompat::Args a = pycompat::parse_args(argc, argv, {"--tilegrid", "--window", "--ref", "--idcode", "--frames-out", "--row", "--db-root", "--part", "--minidb"});
+        pycompat::Args a = pycompat::parse_args(argc, argv, {"--tilegrid", "--window", "--ref", "--idcode", "--frames-out", "--row", "--db-root", "--part", "--minidb", "--map"});
         if (a.help) { toolio::out("%s", USAGE); return 0; }
         const string cmd = a.pos.empty() ? string() : a.pos[0];
+        if (cmd == "check") return cmd_check(a.pos, a.get("--map"));
         const string idcode = a.get("--idcode", "0x03687093");
         if (cmd == "extract" && a.has("--row")) {
             if (a.pos.size() != 3) { toolio::err("%s", USAGE); return 2; }

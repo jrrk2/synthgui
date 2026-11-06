@@ -4,7 +4,7 @@
 #   merge    harness JSON (block as a black box) + block JSON -> harness-merged.json
 #   harness  P&R with the window reserved -> harness.fasm/.bit, interface.txt
 #   window   the block alone on the window chipdb, pinned to the interface -> window.fasm
-#   partial  merged FASM -> frames -> ICAP image, checked against the harness frames
+#   partial  merged FASM, refused if a boundary node has two drivers -> frames -> ICAP image, checked against the harness frames
 #
 # Required: RUN (run directory), HARNESS_JSON, BLOCK_JSON, XDC.  RUN/win/ holds chipdb-win.bin,
 # window-map.json and window.xdc (nextpnr's gen/xilinx_gen.py --window).
@@ -39,7 +39,8 @@ if [ "$step" = harness ] || [ "$step" = all ]; then
 fi
 if [ "$step" = window ] || [ "$step" = all ]; then
   "$SYNTHGUI" --tool pr-block-json window --block "$BLOCK_JSON" --harness "$HARNESS_JSON" --instance "$INSTANCE" \
-    --interface "$H/interface.txt" --map "$RUN/win/window-map.json" --prefix "$PREFIX" --out "$W/window.json" --reserve "$W/reserve.txt"
+    --interface "$H/interface.txt" --map "$RUN/win/window-map.json" --prefix "$PREFIX" --out "$W/window.json" --reserve "$W/reserve.txt" \
+    --static-fasm "$H/harness.fasm" --tilegrid "$TILEGRID" --window "$WINDOW"
   "$NPNR" --device "$PART" --chipdb "$RUN/win/chipdb-win.bin" --json "$W/window.json" -o xdc="$RUN/win/window.xdc" \
     --router router2 --timing-allow-fail -o hold-fix -o clock-tree=off -o delay-matrix=off -o pr-reserve="$W/reserve.txt" \
     -o fasm="$W/window.fasm" --write "$W/window-routed.json" > "$W/pnr.log" 2>&1
@@ -47,6 +48,7 @@ if [ "$step" = window ] || [ "$step" = all ]; then
 fi
 if [ "$step" = partial ] || [ "$step" = all ]; then
   "$SYNTHGUI" --tool pr-partial --tilegrid "$TILEGRID" --window "$WINDOW" merge "$H/harness.fasm" "$W/window.fasm" "$W/merged.fasm"
+  "$SYNTHGUI" --tool pr-partial check "$W/merged.fasm" --map "$RUN/win/window-map.json"   # a node with two drivers is a short: no image
   "$SYNTHGUI" --tool fasm2frames --part "$PART" --db-root "$DB" "$W/merged.fasm" "$W/merged.frames"
   "$SYNTHGUI" --tool pr-partial --tilegrid "$TILEGRID" --window "$WINDOW" extract "$W/merged.frames" "$W/window.icap" --ref "$H/harness.frames" --frames-out "$W/window.frames"
   bits "$W/merged.frames" "$W/merged.bit"   # the same design as a full bitstream, for a JTAG cross-check
