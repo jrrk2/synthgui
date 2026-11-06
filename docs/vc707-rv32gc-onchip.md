@@ -55,8 +55,9 @@ Benchmark: one route of a 463-cell window, FASM identical in every run.
 | B = A + `dynamic_target` prediction | 32K, 8 | 16K, 4 | 16, 32 | 128K | 70.68 | not run | | | |
 | **C** | **32K, 8** | **32K, 8** | **16, 64** | **512K** | **82.85** | **77.75** | **20-22 G** | **261-284 s** | **3.4-3.6x** |
 
-Each pair of times is a first run and a repeat; the repeat gains from the file cache. C's limit is not bracketed: it panics at boot at
-83.3 MHz and is correct at 77.75, nothing between was tried. A is correct at 66.7, 72.2 and 77.75 and wrong at 79.17: wrong hashes that
+Each pair of times is a first run and a repeat; the repeat gains from the file cache. C gave correct results on these tests at 77.78, 79.17, 80.56, 81.25 and 81.48 MHz at a die temperature of about 41 C, the last with two benchmark
+routes in 252-273 s (FASM identical), and panics at boot at 83.33. That is functional testing of one part: it shows typical behaviour on the paths the
+tests happen to exercise, not worst-case timing, so it does not establish a safe clock. A is correct at 66.7, 72.2 and 77.75 and wrong at 79.17: wrong hashes that
 change from run to run, which is timing. Multiplier 9, divider 2 (75 MHz) hangs at `/sbin/init` on A, not understood.
 
 ### Simulator
@@ -105,5 +106,6 @@ sequence (`fpeq_bare.cc`, from the disassembly), because the fault depends on wr
   Nothing shows it mattering, and READ_FIRST would remove the question.
 - The mapper's fix gives LiteEth's `mac_sram_reader` 8 block RAMs it does not need: its read shares the write address, but the check compares
   source text. Correct, wasteful.
-- The mapper's fix has not been through the `sv-tests` sweep.
+- The `sv-tests` sweep shows no change from the mapper's fixes (652 tests, output byte-identical), but no test maps to a block RAM. Directed RAM tests in
+  `runs/2026-11-05-mapfix/` confirm them; the fixes leave this design's mapping byte-identical. They are committed and installed, and no RAM form they change has been on silicon.
 - Real timing, in place of nextpnr's estimate: planned, next on the board.
