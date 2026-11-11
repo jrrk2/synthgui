@@ -47,14 +47,15 @@ Board 1 = the VC707 with a working fan (JTAG serial 210203A7E74F), die 38-41 C. 
 | Route (calibrated chipdb unless stated) | nextpnr sys Fmax | Board 1 | Board 2 |
 |---|---|---|---|
 | rebcal (seed 1, 4c3652aa) | 70.76 | pass 70.00, 72.17, 73.33, 74.00; **fail 75.00** (Memtest: bus, addr, data errors) | pass 70.00 (die 26-39 C) |
-| cal-s2 (seed 2) | 71.64 | pending (see addendum) | |
-| cal-s3 (seed 3) | 78.00 | pending (see addendum) | |
+| cal-s2 (seed 2) | 71.64 | pass 72.22, 73.33; **fail 74.00** (Linux boots, hangs in the FP tests) | |
+| cal-s3 (seed 3) | 78.00 | pass 76.17; **fail 77.75** (Linux boots, hangs in the FP tests) | |
 | cal2fix (pre-RAMB36-fix calibrated route + the OUTMUX line) | 100.23 then | pass 66.67, panic 83.33, Memtest KO 90-100 | |
 | stock route, same placement | 61.76 | pass 66.67 | |
 
-Board 1's failing edge for rebcal is in (74.00, 75.00] MHz against the estimate 70.76: **m = 1.046-1.060**. The calibrated estimate is about
-5% below board 1's failing clock (conservative), even though the calibrated wiring delays read 5-10% fast of board 1. The stock delays still
-used for clock-to-out, BRAM, carry and clock tree are the likely reason.
+m = (last pass .. first fail) / F_cal on board 1 at ~40 C: rebcal 1.046-1.060, seed 2 1.024-1.033, seed 3 **0.977-0.997**. So the
+calibrated estimate is within about +-4% of board 1's failing clock route to route, on either side. Seeds 2 and 3 were a blind test of
+m = 1.046 from rebcal alone: it put their failure 1-2% and 5% too high. Use **m = 0.97** (just under the lowest seen), which keeps every
+route's prediction below its first failure.
 
 ## Board to board (`runs/2026-11-11-board2/README.md`)
 
@@ -74,11 +75,11 @@ A route will run on board b at clock f if
     f <= F_cal x m x s_b x d_T
 
 - F_cal: calibrated nextpnr's sys-clock Fmax for the route (report.json or the last "Max frequency" line of the log).
-- m: board 1's failing clock / F_cal at ~38 C. **1.046 from rebcal** (last pass 74.00 / 70.76); being checked on seeds 2 and 3.
+- m: board 1's failing clock / F_cal at ~40 C, **0.97** from three routes (range 0.977-1.06; see the table).
 - s_b: 1.00 for board 1, ~1.07 for board 2 (window l2 only; whole-route value not measured).
 - d_T: 1 - 1000 ppm/C x (T_max - 38 C), the upper-bound slope: 0.97 at 70 C, 0.955 at 85 C.
 
-Example, rebcal on board 1 up to 70 C: 70.76 x 1.046 x 0.97 = 71.8 MHz. Board 2: ~76.8 MHz. For a sign-off figure independent of the
+Board 1 up to 70 C: f <= F_cal x 0.97 x 0.97 = 0.94 x F_cal (rebcal 66.6, seed 2 67.4, seed 3 73.4 MHz). Board 2 adds s_b ~1.07. For a sign-off figure independent of the
 board, use Vivado's -2 slow corner on the converted DCP instead.
 
 ## How to repeat a board point
@@ -104,7 +105,7 @@ Board traps:
 
 ## Open items
 
-- Seeds 2 and 3 on board 1 (running at the time of writing), then fix m from three routes.
+- More routes (other placements, other designs) to tighten m; three routes on one placement give 0.977-1.06.
 - s_b for board 2 on a whole route (board 2 only fails at a hotter temperature without its fan; needs external airflow to match).
 - Re-time existing routes: nextpnr cannot reload its own xilinx routed JSON (NEXTPNR_BEL and ROUTING are written in nextpnr-xilinx site
   form by `postRouteArchInfo`, `attributesToArchInfo` reads only himbaechel names).
