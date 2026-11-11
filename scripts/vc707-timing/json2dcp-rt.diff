@@ -1,0 +1,183 @@
+--- /home/jonathan/json_drc-portable/src/json2dcp.java	2026-11-07 07:45:03.602516777 +0000
++++ dcp-c/j2d/json2dcp.java	2026-11-10 14:27:54.603560788 +0000
+@@ -18,6 +18,12 @@
+ import java.util.Map;
+ 
+ public class json2dcp {
++    // LUT route-through import, see the routing loop
++    static final java.util.regex.Pattern RT_ENTRY = java.util.regex.Pattern.compile("([^/]+)/([A-Z0-9_]+)->SITEWIRE/([^/]+)/([A-D])6LUT_O6");
++    static final java.util.regex.Pattern RT_SITE_SITE = java.util.regex.Pattern.compile("SITEWIRE/([^/]+)/([A-D])(6LUT_O6|5LUT_O5)->SITEWIRE/([^/]+)/(\\w+)");
++    static final java.util.regex.Pattern RT_EXIT = java.util.regex.Pattern.compile("SITEWIRE/([^/]+)/([A-D])(MUX)?->[^/]+/[A-Z0-9_]+");
++    static int rtPips = 0, rtCells = 0, rtFail = 0;
++
+     static int skipConst = 0;
+     static int padPinConstraints = 0, padIostdConstraints = 0;
+ 
+@@ -366,7 +372,8 @@
+                     NextpnrCellPort port = cell.ports.get(pc.getKey());
+                     JsonArray conn = pc.getValue().getAsJsonArray();
+                     if (conn.size() > 0) {
+-                        NextpnrNet net = nets.get(conn.get(0).getAsInt());
++                        NextpnrNet net = conn.get(0).getAsJsonPrimitive().isString() ? null : nets.get(conn.get(0).getAsInt());
++                        if (net == null) { System.err.println("json2dcp: constant or unknown bit " + conn.get(0) + " on " + cell.name + "." + pc.getKey() + ", skipped"); continue; }
+                         port.net = net;
+                         if (port.type == PortDirection.PORT_OUT) {
+                             net.driver = port;
+@@ -616,6 +623,7 @@
+ 
+         if (d.getTopEDIFCell().getCellInst(basename) == null) {
+             String macrotype = nc.attrs.get("X_ORIG_MACRO_PRIM");
++            if (macrotype == null) macrotype = basename.replaceAll("_\\d+$", "");  // synthgui's macro instances are named after the primitive
+             if (d.getNetlist().getCell(macrotype) == null)
+                 d.getNetlist().getHDIPrimitivesLibrary().addCell(Design.getUnisimCell(Unisim.valueOf(macrotype)));
+             Design.getUnisimCell(Unisim.valueOf(macrotype)).createCellInst(basename, d.getTopEDIFCell());
+@@ -626,14 +634,23 @@
+         // BEL attrs may be SITE/BEL or SITE/SITETYPE/BEL (IOB pads:
+         // "IOB_X0Y77/IOB18/INBUF_DCIEN") -- use first + LAST components.
+         com.xilinx.rapidwright.device.Site site = d.getDevice().getSite(bel[0]);
+-        com.xilinx.rapidwright.device.BEL rwbel = (site == null) ? null : site.getBEL(bel[bel.length - 1]);
++        com.xilinx.rapidwright.device.BEL rwbel = (site == null) ? null : site.getBEL(bel[bel.length - 1].replaceFirst("^IOB(18|33)[MS]?\\.", ""));
+         if (site == null || rwbel == null) {
+             System.err.println("WARN: cannot resolve BEL '" + nc.attrs.get("NEXTPNR_BEL")
+                     + "' for subcell " + nc.name + " (type " + nc.attrs.get("X_ORIG_TYPE")
+                     + ") -- cell left unplaced");
+             return null;
+         }
+-        Cell c = d.createAndPlaceCell(null, fullname, unitype, site, rwbel);
++        java.util.regex.Matcher vm = java.util.regex.Pattern.compile("^(IOB(18|33)[MS]?)\\.").matcher(bel[bel.length - 1]);
++        if (vm.find() && d.getSiteInstFromSite(site) == null
++                && com.xilinx.rapidwright.device.SiteTypeEnum.valueOf(vm.group(1)) != site.getSiteTypeEnum())
++            d.createSiteInst(site.getName(), com.xilinx.rapidwright.device.SiteTypeEnum.valueOf(vm.group(1)), site);
++        Cell c;
++        try { c = d.createAndPlaceCell(null, fullname, unitype, site, rwbel); }
++        catch (RuntimeException ex) {
++            System.err.println("WARN: cannot place subcell " + nc.name + " (" + unitype + ") on " + nc.attrs.get("NEXTPNR_BEL") + ": " + ex.getMessage() + " -- cell left unplaced");
++            return null;
++        }
+         c.setBELFixed(true);
+         c.setSiteFixed(true);
+         // createAndPlaceCell(null, ...) makes a PHYSICAL-ONLY cell: no EDIF
+@@ -717,7 +734,8 @@
+                     || nc.type.equals("$PACKER_GND_DRV") || nc.type.equals("$PACKER_VCC_DRV")) {
+                     continue;
+                 }
+-                throw new RuntimeException("json2dcp: cell '" + nc.name + "' of type '"
++                if (nc.type.matches("IBUFDS_GTE2|GTXE2_\\w+|GTHE2_\\w+")) nc.attrs.put("X_ORIG_TYPE", nc.type);  // unpacked hard blocks keep their unisim type
++                else throw new RuntimeException("json2dcp: cell '" + nc.name + "' of type '"
+                     + nc.type + "' has no X_ORIG_TYPE attribute — nextpnr's packer "
+                     + "needs to tag this cell so RapidWright can re-create it.  "
+                     + "Aborting rather than silently dropping the cell.");
+@@ -753,6 +771,8 @@
+                     // emitted EDIF and downstream constraint matching fails.
+                     String edifName = nc.name.replace("/", "__")
+                                              .replaceFirst("\\$intcell\\$[A-Z]+$", "");
++                    // IOBUFDS: its IBUFDS is an intcell, its OBUFTDS subcells already made the macro instance of that name
++                    if (des.getTopEDIFCell().getCellInst(edifName) != null) edifName = edifName + "_" + origType;
+                     // nextpnr emits NEXTPNR_BEL as "SITE/BEL" on most architectures
+                     // but as "SITE/SITETYPE/BEL" on 7-series IOB sites where the
+                     // site has multiple type personalities (IOB18 vs IOB33, or
+@@ -770,6 +790,10 @@
+                         nb = nb.substring(0, nb.length() - "/BUFGCTRL".length()) + "/BUFG";
+                     }
+                     String[] belParts = nb.split("/");
++                    if (belParts.length == 2 && belParts[1].matches("IOB(18|33)[MS]?\\..*")) {  // "SITE/IOB18M.INBUF_DCIEN": the variant in BEL form
++                        nb = belParts[0] + "/" + belParts[1].replaceFirst("\\.", "/");
++                        belParts = nb.split("/");
++                    }
+                     if (belParts.length == 3) {
+                         Site s = des.getDevice().getSite(belParts[0]);
+                         if (s == null) {
+@@ -1223,9 +1247,85 @@
+                 pipDroppedLookup = 0, pipDroppedParse = 0,
+                 pipNodeTraversal = 0, pipOracleHit = 0, pipOracleReverseBidir = 0,
+                 pipOracleNodeReject = 0, pipDroppedDup = 0;
++            // LUT route-throughs (2026-11-10).  nextpnr writes one as
++            //   <tile>/<in pin wire> -> SITEWIRE/<site>/<L>6LUT_O6
++            // followed by the LUT output's uses: <L>FFMUX_OUT (the slice's own
++            // FF), <L> (direct site output) or <L>MUX (OUTMUX), the last two
++            // then leaving the site.  Vivado records the first as a routethru
++            // Cell on the LUT BEL named after the FF (pin map A<j> -> D), and a
++            // site exit as the tile's routethru PIPs <in> ->> <L> and
++            // <L> ->> <L>MUX, with no site pins of their own.
++            HashMap<String, HashSet<String>> rtUses = new HashMap<>();
++            for (int i = 0; i < (routing.length-2); i+=3) {
++                String p = routing[i+1];
++                java.util.regex.Matcher rm = RT_SITE_SITE.matcher(p);
++                if (rm.matches() && rm.group(1).equals(rm.group(4)) && rm.group(3).equals("6LUT_O6"))
++                    rtUses.computeIfAbsent(rm.group(1) + "/" + rm.group(2), k -> new HashSet<>()).add(rm.group(5));
++            }
++            HashSet<String> rtEntered = new HashSet<>();
++            for (int i = 0; i < (routing.length-2); i+=3) {
++                java.util.regex.Matcher rm = RT_ENTRY.matcher(routing[i+1]);
++                if (rm.matches()) rtEntered.add(rm.group(3) + "/" + rm.group(4));
++            }
++            rtUses.keySet().retainAll(rtEntered);   // a LUT output used by its own cell is not a route-through
+             for (int i = 0; i < (routing.length-2); i+=3) {
+                 String wire = routing[i];
+                 String pip = routing[i+1];
++                if (!rtUses.isEmpty() && pip != null && !pip.isEmpty()) {
++                    java.util.regex.Matcher em = RT_ENTRY.matcher(pip);
++                    if (em.matches() && rtUses.containsKey(em.group(3) + "/" + em.group(4))) {
++                        HashSet<String> uses = rtUses.get(em.group(3) + "/" + em.group(4));
++                        String L = em.group(4);
++                        SiteInst si = des.getSiteInstFromSiteName(em.group(3));
++                        Tile t = des.getDevice().getTile(em.group(1));
++                        Site site = des.getDevice().getSite(em.group(3));
++                        String inPin = null;   // the site pin the tile wire feeds, authoritative over nextpnr's name
++                        for (int pi = 0; site != null && pi < site.getSitePinCount(); pi++)
++                            if (em.group(2).equals(site.getTileWireNameFromPinName(site.getPinName(pi)))) inPin = site.getPinName(pi);
++                        boolean exit = uses.contains(L) || uses.contains(L + "MUX");
++                        if (exit && t != null && site != null && inPin != null) {
++                            String outW = site.getTileWireNameFromPinName(L);
++                            PIP p1 = t.getPIP(t.getWireIndex(em.group(2)), t.getWireIndex(outW));
++                            if (p1 != null && seenPips.add(p1)) { n.addPIP(p1); pipImported++; rtPips++; }
++                            if (uses.contains(L + "MUX")) {
++                                PIP p2 = t.getPIP(t.getWireIndex(outW), t.getWireIndex(site.getTileWireNameFromPinName(L + "MUX")));
++                                if (p2 != null && seenPips.add(p2)) { n.addPIP(p2); pipImported++; rtPips++; }
++                                else if (p2 == null) rtFail++;
++                            }
++                            if (p1 == null) rtFail++;
++                        }
++                        boolean ff = false;
++                        for (String u : uses) if (u.equals(L + "FFMUX_OUT")) ff = true;
++                        if (ff && si != null && inPin != null) {
++                            Cell ffc = si.getCell(L + "FF");
++                            BEL lut = si.getSite().getBEL(L + "6LUT");
++                            if (ffc != null && lut != null && si.getCell(lut) == null) {
++                                try {
++                                    if (si.getSitePinInst(inPin) == null) n.createPin(inPin, si);
++                                    Cell rt = new Cell(ffc.getName(), si, lut);
++                                    rt.setEDIFHierCellInst(ffc.getEDIFHierCellInst());
++                                    rt.setType(ffc.getType());
++                                    rt.setRoutethru(true);
++                                    rt.addPinMapping("A" + inPin.substring(1), "D");
++                                    si.addCell(rt);
++                                    BEL port = si.getSite().getBEL(inPin);
++                                    if (port != null) si.routeIntraSiteNet(n, port.getPin(0), lut.getPin("A" + inPin.substring(1)));
++                                    rtCells++;
++                                } catch (RuntimeException ex) { rtFail++; if (rtFail < 10) System.err.println("rt cell " + si.getName() + "/" + L + ": " + ex.getMessage()); }
++                            } else rtFail++;
++                        }
++                        if (!ff) continue;      // exit only: no site pin, the routethru PIPs carry it
++                        // FF (and maybe exit too): fall through, the site pin and FFMUX are bound below
++                    }
++                    java.util.regex.Matcher sm = RT_SITE_SITE.matcher(pip);
++                    if (sm.matches() && rtUses.containsKey(sm.group(1) + "/" + sm.group(2))
++                            && (sm.group(5).equals(sm.group(2)) || sm.group(5).equals(sm.group(2) + "MUX")))
++                        continue;               // LUT output to the site exit: implied by the routethru PIPs
++                    java.util.regex.Matcher xm = RT_EXIT.matcher(pip);
++                    if (xm.matches() && rtUses.containsKey(xm.group(1) + "/" + xm.group(2))
++                            && rtUses.get(xm.group(1) + "/" + xm.group(2)).contains(xm.group(2) + (xm.group(3) == null ? "" : xm.group(3))))
++                        continue;               // the exit pin: owned by the routethru PIP, not a SitePinInst
++                }
+ 
+                 if (pip.isEmpty() || pip.trim().isEmpty()) {
+                     // A bare wire entry (no pip) means the net OCCUPIES that
+@@ -2686,6 +2786,7 @@
+             for (SiteInst si : des.getSiteInsts()) { si.routeSite(); n++; }
+             System.out.println("DRC-INFO routeSite() applied to " + n + " site(s)");
+         }
++        System.out.println("[routethru] tile routethru PIPs " + rtPips + ", FF routethru cells " + rtCells + ", failed " + rtFail);
+         des.writeCheckpoint(args[2]);
+     }
+ 
