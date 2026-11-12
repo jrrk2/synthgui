@@ -85,14 +85,20 @@ def escape_dividers(text):
     packer's x$LUT$... carries) and writes them unescaped, but '/' is SDF's
     hierarchy divider: read_sdf looks for an instance DP inside storage_0_...
     and skips the cell.  Escape every '/' of an INSTANCE name, and every one
-    but the pin divider (the last) of an INTERCONNECT pin."""
+    but the pin divider (the last) of an INTERCONNECT pin.  A pin name that
+    starts with a digit (SELMUX2_1's 0 and 1) is not an SDF identifier: it is
+    written \\0, in an INTERCONNECT pin and in an IOPATH."""
     unescaped = re.compile(r"(?<!\\)/")
+    def pin_escape(pin):
+        return "\\" + pin if pin[:1].isdigit() else pin
     def path(p, keep_last):
         if not keep_last:
             return unescaped.sub(r"\/", p)
         head, sep, pin = p.rpartition("/")
-        return (unescaped.sub(r"\/", head) + sep + pin) if sep else p
+        return (unescaped.sub(r"\/", head) + sep + pin_escape(pin)) if sep else p
     text = re.sub(r"\(INSTANCE ([^)]+)\)", lambda m: "(INSTANCE %s)" % path(m.group(1).strip(), False), text)
+    text = re.sub(r"\(IOPATH (\S+) (\S+) ",
+                  lambda m: "(IOPATH %s %s " % (pin_escape(m.group(1)), pin_escape(m.group(2))), text)
     return re.sub(r"\(INTERCONNECT (\S+) (\S+) ",
                   lambda m: "(INTERCONNECT %s %s " % (path(m.group(1), True), path(m.group(2), True)), text)
 
@@ -158,7 +164,7 @@ def write_netlist(path, mod, inst_variant):
         return vid(names.get(b, "n%d" % b))
     insts = []
     for cn, c in mod["cells"].items():
-        conns = ["." + vid(p).rstrip() + "(" + net(bits[0]) + ")" for p, bits in sorted(c["connections"].items()) if bits]
+        conns = ["." + vid(p) + "(" + net(bits[0]) + ")" for p, bits in sorted(c["connections"].items()) if bits]
         insts.append("  %s %s(%s);" % (vid(inst_variant.get(cn, c["type"])), vid(cn), ", ".join(conns)))
     ports = [(p, v["direction"], v["bits"]) for p, v in mod.get("ports", {}).items()]
     out = ["module top(%s);" % ", ".join(vid(names.get(b[0], p)) for p, _, b in ports if b)]

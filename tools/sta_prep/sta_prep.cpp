@@ -283,11 +283,35 @@ static string slash_sub(const string& p) {
     }
     return r;
 }
+// A pin name that starts with a digit (SELMUX2_1's 0 and 1) is not an SDF identifier: write it \0
+static string pin_escape(const string& pin) {
+    return !pin.empty() && pin[0] >= '0' && pin[0] <= '9' ? "\\" + pin : pin;
+}
 static string path_escape(const string& p, bool keep_last) {
     if (!keep_last) return slash_sub(p);
     size_t k = p.rfind('/');
     if (k == string::npos) return p;
-    return slash_sub(p.substr(0, k)) + "/" + p.substr(k + 1);
+    return slash_sub(p.substr(0, k)) + "/" + pin_escape(p.substr(k + 1));
+}
+// "(KEY a b " -> "(KEY f(a) f(b) " for every occurrence, the two tokens being runs of non-space
+template <class F> static string rewrite_pair(const string& text, const string& key, F f) {
+    string out;
+    size_t i = 0;
+    for (;;) {
+        size_t p = text.find(key, i);
+        if (p == string::npos) break;
+        size_t s1 = p + key.size(), a = s1;
+        while (a < text.size() && !is_ws(text[a])) a++;
+        bool ok = a > s1 && a < text.size() && text[a] == ' ';
+        size_t s2 = a + 1, b = s2;
+        if (ok) { while (b < text.size() && !is_ws(text[b])) b++; ok = b > s2 && b < text.size() && text[b] == ' '; }
+        if (!ok) { out.append(text, i, p + 1 - i); i = p + 1; continue; }
+        out.append(text, i, p - i);
+        out += key + f(text.substr(s1, a - s1)) + " " + f(text.substr(s2, b - s2)) + " ";
+        i = b + 1;
+    }
+    out.append(text, i, string::npos);
+    return out;
 }
 static string escape_dividers(const string& text) {
     string t1;
@@ -302,23 +326,8 @@ static string escape_dividers(const string& text) {
         i = e + 1;
     }
     t1.append(text, i, string::npos);
-    string t2;
-    i = 0;
-    for (;;) {
-        size_t p = t1.find("(INTERCONNECT ", i);
-        if (p == string::npos) break;
-        size_t s1 = p + 14, a = s1;
-        while (a < t1.size() && !is_ws(t1[a])) a++;
-        bool ok = a > s1 && a < t1.size() && t1[a] == ' ';
-        size_t s2 = a + 1, b = s2;
-        if (ok) { while (b < t1.size() && !is_ws(t1[b])) b++; ok = b > s2 && b < t1.size() && t1[b] == ' '; }
-        if (!ok) { t2.append(t1, i, p + 1 - i); i = p + 1; continue; }
-        t2.append(t1, i, p - i);
-        t2 += "(INTERCONNECT " + path_escape(t1.substr(s1, a - s1), true) + " " + path_escape(t1.substr(s2, b - s2), true) + " ";
-        i = b + 1;
-    }
-    t2.append(t1, i, string::npos);
-    return t2;
+    t1 = rewrite_pair(t1, "(IOPATH ", pin_escape);
+    return rewrite_pair(t1, "(INTERCONNECT ", [](const string& p) { return path_escape(p, true); });
 }
 
 // rename the read clocks and give each CELL the variant its instance uses
@@ -481,8 +490,9 @@ static void write_netlist(const string& path, const JV& mod, const Sdf& sdf) {
         string cs;
         for (auto* kv : conns) {
             if (kv->second.a.empty()) continue;
+            // vid() ends an escaped name with the space that terminates it: a pin
+            // such as SELMUX2_1's 0 and 1 is written .\0 (net), never .\0(net)
             string pn = vid(kv->first);
-            while (!pn.empty() && is_ws(pn.back())) pn.pop_back();
             if (!cs.empty()) cs += ", ";
             cs += "." + pn + "(" + net(kv->second.a[0]) + ")";
         }
