@@ -68,7 +68,20 @@ nextpnr() {
         -DBUILD_GUI=OFF -DBUILD_PYTHON=OFF -DHIMBAECHEL_XILINX_DEVICES="$(echo ${CHIPDBS:-xc7a50t xc7vx485t} | tr ' ' ';')" \
         -DHIMBAECHEL_PRJXRAY_DB="$deps/prjxray-db" -DCMAKE_BUILD_TYPE=Release \
         ${libs[@]+"${libs[@]}"}
-    cmake --build "$out/nextpnr" --target nextpnr-himbaechel --parallel "$jobs"
+    cmake --build "$out/nextpnr" --target nextpnr-himbaechel bbasm --parallel "$jobs"
+    # The calibrated xc7vx485t chipdb, beside the stock one: the same generator with --timing-cal and the silicon calibration in
+    # prjxray-db (virtex7/timings/silicon, measured on VC707 board 1; docs/vc707-timing-calibration.md). A project selects it with
+    # --chipdb {builds}/nextpnr/chipdb-xc7vx485t-cal.bin in its nextpnr_flags (projects/vortex_vc707.json does).
+    local cal="$deps/prjxray-db/virtex7/timings/silicon/xc7vx485t-2.cal.json"
+    case " ${CHIPDBS:-xc7a50t xc7vx485t} " in *" xc7vx485t "*)
+        if [ -f "$cal" ]; then
+            say "nextpnr: calibrated xc7vx485t chipdb"
+            python3 "$deps/nextpnr/himbaechel/uarch/xilinx/gen/xilinx_gen.py" --xray "$deps/prjxray-db/virtex7" --device xc7vx485t \
+                --timing-cal "$cal" --bba "$out/nextpnr/chipdb-xc7vx485t-cal.bba"
+            "$out/nextpnr/bba/bbasm" --l "$out/nextpnr/chipdb-xc7vx485t-cal.bba" "$out/nextpnr/chipdb-xc7vx485t-cal.bin"
+            rm -f "$out/nextpnr/chipdb-xc7vx485t-cal.bba"
+        fi ;;
+    esac
 }
 
 fasm2netlist() {

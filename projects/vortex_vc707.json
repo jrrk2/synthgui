@@ -16,8 +16,8 @@
     "~/vortex/hw/syn/xilinx/vc707/vortex_vc707.sv"
   ],
   "incdirs": [
-    "~/vortex/build/sw",
-    "~/vortex/build/hw",
+    "{root}/projects/vortex_vc707-src/vxgen/sw",
+    "{root}/projects/vortex_vc707-src/vxgen",
     "~/vortex/hw/syn/xilinx/vc707",
     "~/vortex/hw/rtl",
     "~/vortex/hw/rtl/libs",
@@ -48,7 +48,7 @@
   "verilator_root": "{prefix}/share/verilator",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
   "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
-  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60",
+  "nextpnr_flags": "--router router2 --timing-allow-fail -o hold-fix --placer-heap-timingweight 60 --chipdb {builds}/nextpnr/chipdb-xc7vx485t-cal.bin",
   "prjxray_db": "{deps}/prjxray-db",
   "sta": "{prefix}/bin/sta",
   "openfpgaloader": "{prefix}/bin/openFPGALoader",
