@@ -43,7 +43,8 @@ module byte_fifo #(parameter AW = 3) (      // 2^AW = 8 entries
             q   <= q_sh;
             cnt <= cnt_sh;
             if (dw) begin
-                q[(cnt_sh*8) +: 8] <= din;  // insert at the (post-read) tail
+                for (int i = 0; i < DEPTH; i++)      // insert at the (post-read) tail
+                    if (cnt_sh == i[AW:0]) q[i*8 +: 8] <= din;
                 cnt <= cnt_sh + 1'b1;
             end
         end
