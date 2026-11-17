@@ -67,6 +67,27 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "--map-only-partition-min {}", true,
          "Per-instance mapping folds an instance with fewer AND nodes than this into its parent's "
          "partition, so LUTs can span the boundaries of small modules.", "", 0, 1e9},
+        {"synth.timing", "Timing analysis against the XDC", OptionSpec::Bool, "1",
+         "--map-only-sdc {xdc} --map-only-timing-report {work}/{top}_timing.rpt", true,
+         "Read the XDC's create_clock, set_input_delay / set_output_delay, set_false_path, set_max_delay and "
+         "set_multicycle_path and time the mapped netlist before placement (Tatum; 7-series cell delays, nets "
+         "estimated from their fanout): a \"(synthesis)\" row per clock in the Timing tab, the worst paths in "
+         "<top>_timing.rpt in the work directory.  Nets above the fanout limit are split over LUT and register "
+         "copies.  MMCM / PLL outputs are propagated clocks, related to their input clock as Vivado times them."},
+        {"synth.timing_iterations", "Timing-driven mapping passes", OptionSpec::Int, "1",
+         "--map-only-timing-iterations {}", true,
+         "Passes after the first that map again with the previous pass's arrival and required times handed to ABC, "
+         "so it spends area on the paths that fail; the pass with the best worst slack is the one written.  One "
+         "unless set; 0 keeps the first pass (analysis and fanout copies only).  Needs timing analysis on.",
+         "", 0, 10},
+        {"synth.max_fanout", "Largest net fanout", OptionSpec::Int, "32", "--map-only-max-fanout {}", true,
+         "A LUT or register driving more loads than this is copied until none does (0: no limit).  "
+         "32 when timing analysis is on and this is not set, else no limit.", "", 0, 100000},
+        {"synth.timing_margin", "Timing margin (ns)", OptionSpec::Real, "1", "--map-only-timing-margin {}", true,
+         "How much the timing-driven passes aim to beat the constraints by, leaving room for routing; "
+         "a fifth of the period when not set.", "", 0, 100},
+        {"synth.period", "Clock period without an XDC (ns)", OptionSpec::Real, "10", "--map-only-period {}", true,
+         "Time every clock at this period when the XDC constrains none, or the project has no XDC.", "", 0.1, 1e6},
 
         // ---- synthesis: Verilator's warnings, each one checked is not reported
         {"synth.warn.WIDTHTRUNC", "WIDTHTRUNC: value truncated to a narrower target", OptionSpec::Bool, "1", "-Wno-WIDTHTRUNC", false,

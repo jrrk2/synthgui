@@ -229,6 +229,8 @@ struct Project {
     }
     void applyOptions() {
         vars["synth_options"] = expandHome(optionArgs("synth", options));
+        // timing analysis reads the XDC; a project without one is timed at the plain period, if given
+        if (xdc.isEmpty()) vars["synth_options"].remove("--map-only-sdc {xdc} ");
         vars["nextpnr_flags"] = expandHome(optionArgs("pnr", options));
         // the figure of merit prices routes with the placer's delay matrix: the
         // file when the Delay model names one, else nextpnr's fallback formula
@@ -1697,6 +1699,39 @@ private:
             if (fail) failing.insert(c.key());
         }
         m_timing->resizeColumnsToContents();
+        // the mapper's own analysis before placement, when the Synthesis panel's timing analysis is on:
+        // "%Info: map-timing: [pass N: ]clock clk period 5.000 ns: WNS -0.123 ns, TNS -4.500 ns,
+        // 12/345 endpoints failing (Fmax 180.2 MHz)"; with several passes, the figures of the one written
+        const QString synth = readAll(m_p.logPath("synth"));
+        if (synth.contains("map-timing:")) {
+            static const QRegularExpression wr("map-timing: written: pass (\\d+)");
+            const auto wm = wr.match(synth);
+            const QString written = wm.hasMatch() ? wm.captured(1) : QString();
+            static const QRegularExpression mt("map-timing: (?:pass (\\d+): )?clock (\\S+) period ([\\d.]+) ns: "
+                                               "WNS (-?[\\d.]+) ns, TNS (-?[\\d.]+) ns, (\\d+)/(\\d+) endpoints failing "
+                                               "\\(Fmax ([\\d.]+) MHz\\)");
+            auto mi = mt.globalMatch(synth);
+            while (mi.hasNext()) {
+                const auto m = mi.next();
+                if (m.captured(1) != written) continue;
+                const bool fail = m.captured(6).toInt() > 0;
+                const int r = m_timing->rowCount();
+                m_timing->insertRow(r);
+                auto* name = new QTableWidgetItem(m.captured(2) + " (synthesis)");
+                name->setToolTip(QString("estimated before placement: WNS %1 ns, TNS %2 ns, %3 of %4 endpoints failing")
+                                     .arg(m.captured(4), m.captured(5), m.captured(6), m.captured(7)));
+                m_timing->setItem(r, 0, name);
+                m_timing->setItem(r, 1, new QTableWidgetItem(m.captured(8)));
+                m_timing->setItem(r, 2, new QTableWidgetItem(QString::number(1000.0 / m.captured(3).toDouble(), 'f', 2)));
+                auto* st = new QTableWidgetItem(fail ? "FAIL" : "PASS");
+                st->setForeground(fail ? QColor(0xc0, 0x20, 0x20) : QColor(0x20, 0x80, 0x20));
+                QFont f = st->font();
+                f.setBold(true);
+                st->setFont(f);
+                m_timing->setItem(r, 3, st);
+            }
+            m_timing->resizeColumnsToContents();
+        }
         // the critical path of every clock (failing ones are what the plot marks; with
         // none failing, the worst clock's path is shown so the plot still says where it runs)
         QString target;

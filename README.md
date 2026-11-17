@@ -34,7 +34,8 @@ What it does today (stage one: every tool is a separate process):
 * **Area**: the mapper's `%Info: map:` cell counts grouped into device
   resources (LUT, FF, RAMB36, LUTRAM, DSP, IO, BUFG) with utilisation of the
   part, before placement; after placement, nextpnr's own utilisation.
-* **Timing**: Fmax per clock from nextpnr against its target, PASS / FAIL.
+* **Timing**: Fmax per clock from nextpnr against its target, PASS / FAIL; the mapper's own
+  estimate before placement as a "(synthesis)" row when timing analysis is on.
 * **Chip**: every placed cell from nextpnr's placement JSON at its grid
   position, coloured by kind (block RAM / DSP drawn at their five-row size),
   the critical-path cells of failing clocks (or of the worst clock when all
@@ -121,6 +122,22 @@ On bramtest, OpenSTA agrees with nextpnr on nextpnr's own worst path to within
 about 7%, but it finds a deeper path (an incrementer after the UART divider
 compare) that nextpnr's report does not show.
 
+## Timing-driven synthesis
+
+With *Timing analysis against the XDC* on in the Synthesis panel (`"synth.timing": "1"`, on in the example projects) the
+mapper reads the XDC's timing commands (`create_clock`, `set_input_delay` / `set_output_delay`, `set_false_path`,
+`set_max_delay`, `set_multicycle_path`, `set_clock_groups`; the pin and placement commands are skipped) and times the mapped
+netlist before placement (verilator's `--map-only-sdc`, Tatum, VTR's timing analyser, built in): 7-series cell delays, nets
+estimated from their fanout, MMCM / PLL outputs as propagated clocks related to their input clock. The Timing tab gets a
+"(synthesis)" row per clock, and `<top>_timing.rpt` in the work directory holds the worst paths. Nets with more loads than
+*Largest net fanout* (32) are split over copies of the LUT or register. *Timing-driven mapping passes* (one unless set; 0 for analysis and
+fanout copies only) maps again with the previous pass's arrival and required times handed to ABC, keeping the pass with the
+best worst slack; *Timing margin* is what
+those passes aim to beat the constraint by, room for routing. A project without an XDC can give *Clock period without an
+XDC* instead. The estimate is before placement, so nextpnr's and OpenSTA's rows are the ones that count: on vc707_calc the
+fanout copies took the routed design from 161 to 168 MHz and a second pass to 174, against a 200 MHz target the RTL's block
+RAM read path cannot meet.
+
 ## New projects
 
 Run `build/synthgui` without `--project`, or press "New project..." on the toolbar, to
@@ -166,8 +183,8 @@ The tools the flow calls are submodules under `deps/`:
 
 | submodule | provides |
 | --- | --- |
-| `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog |
-| `nextpnr` (openXC7), `prjxray` (openXC7) | pinned to the commits the flow was proven on; prjxray's `xc7frames2bit` makes the bitstream from the frames the built-in `fasm2frames` writes |
+| `verilator` (jrrk2, `synthesis-timing` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog; `--map-only-sdc` timing analysis and timing-driven mapping |
+| `nextpnr` (openXC7, `timing-cal` branch: silicon-calibrated delays, RAMB36E1 paths timed), `prjxray` (openXC7) | pinned to the commits the flow was proven on; prjxray's `xc7frames2bit` makes the bitstream from the frames the built-in `fasm2frames` writes |
 | `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
 
 See [docs/vc707-rv32gc-onchip.md](docs/vc707-rv32gc-onchip.md) for the RV32GC harness that routes and loads its own window, and how its CPU configuration was chosen.

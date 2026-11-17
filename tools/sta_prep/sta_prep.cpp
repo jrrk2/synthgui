@@ -283,11 +283,13 @@ static string slash_sub(const string& p) {
     }
     return r;
 }
+// a pin named by a digit (a MUXF7's 0 and 1) is escaped, as the Verilog netlist escapes it
+static string pin_escape(const string& pin) { return !pin.empty() && isdigit((unsigned char)pin[0]) ? "\\" + pin : pin; }
 static string path_escape(const string& p, bool keep_last) {
     if (!keep_last) return slash_sub(p);
     size_t k = p.rfind('/');
-    if (k == string::npos) return p;
-    return slash_sub(p.substr(0, k)) + "/" + p.substr(k + 1);
+    if (k == string::npos) return pin_escape(p);
+    return slash_sub(p.substr(0, k)) + "/" + pin_escape(p.substr(k + 1));
 }
 static string escape_dividers(const string& text) {
     string t1;
@@ -318,7 +320,24 @@ static string escape_dividers(const string& text) {
         i = b + 1;
     }
     t2.append(t1, i, string::npos);
-    return t2;
+    // (IOPATH 0 OUT ...): the ports of a cell delay, escaped the same way
+    string t3;
+    i = 0;
+    for (;;) {
+        size_t p = t2.find("(IOPATH ", i);
+        if (p == string::npos) break;
+        t3.append(t2, i, p + 8 - i);
+        i = p + 8;
+        for (int port = 0; port < 2 && i < t2.size() && t2[i] != '('; port++) {
+            size_t e = i;
+            while (e < t2.size() && !is_ws(t2[e])) e++;
+            t3 += pin_escape(t2.substr(i, e - i));
+            while (e < t2.size() && is_ws(t2[e])) t3 += t2[e++];
+            i = e;
+        }
+    }
+    t3.append(t2, i, string::npos);
+    return t3;
 }
 
 // rename the read clocks and give each CELL the variant its instance uses
@@ -481,8 +500,7 @@ static void write_netlist(const string& path, const JV& mod, const Sdf& sdf) {
         string cs;
         for (auto* kv : conns) {
             if (kv->second.a.empty()) continue;
-            string pn = vid(kv->first);
-            while (!pn.empty() && is_ws(pn.back())) pn.pop_back();
+            const string pn = vid(kv->first);  // an escaped pin name (a MUXF7's 0 and 1) keeps its closing space: OpenSTA rejects ".\0("
             if (!cs.empty()) cs += ", ";
             cs += "." + pn + "(" + net(kv->second.a[0]) + ")";
         }

@@ -107,7 +107,8 @@
     "synth.warn.PINMISSING": "1",
     "synth.warn.UNOPTFLAT": "1",
     "synth.warn.TIMESCALEMOD": "1",
-    "synth.warn.SPECIFYIGN": "1"
+    "synth.warn.SPECIFYIGN": "1",
+    "synth.timing": "1"
   },
   "family": "artix7"
 }

@@ -94,5 +94,8 @@
     "DSP": 2800,
     "IO": 700,
     "BUFG": 32
+  },
+  "options": {
+    "synth.timing": "1"
   }
 }

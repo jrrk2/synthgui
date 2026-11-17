@@ -80,5 +80,8 @@
     "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
     "family": "virtex7",
     "tileverilog": "{builds}/fasm2netlist/tileverilog",
-    "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge"
+    "bpi_bridge_dir": "~/synthgui-work/vc707_bpi_bridge",
+    "options": {
+        "synth.timing": "1"
+    }
 }

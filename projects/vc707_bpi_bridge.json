@@ -66,5 +66,8 @@
     "BUFG": 32
   },
   "tileverilog": "{builds}/fasm2netlist/tileverilog",
-  "family": "virtex7"
+  "family": "virtex7",
+  "options": {
+    "synth.timing": "1"
+  }
 }
