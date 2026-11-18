@@ -1,7 +1,7 @@
 [submodule "deps/verilator"]
 	path = deps/verilator
 	url = https://github.com/jrrk2/verilator.git
-	branch = synthesis-timing
+	branch = synthesis
 	ignore = dirty
 [submodule "deps/prjxray-db"]
 	path = deps/prjxray-db

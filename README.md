@@ -183,7 +183,7 @@ The tools the flow calls are submodules under `deps/`:
 
 | submodule | provides |
 | --- | --- |
-| `verilator` (jrrk2, `synthesis-timing` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog; `--map-only-sdc` timing analysis and timing-driven mapping |
+| `verilator` (jrrk2, `synthesis` branch) | `--map-only-output` synthesis; `--map-only-verilog` the same netlist as structural Verilog; `--map-only-sdc` timing analysis and timing-driven mapping |
 | `nextpnr` (openXC7, `timing-cal` branch: silicon-calibrated delays, RAMB36E1 paths timed), `prjxray` (openXC7) | pinned to the commits the flow was proven on; prjxray's `xc7frames2bit` makes the bitstream from the frames the built-in `fasm2frames` writes |
 | `fasm2netlist` (jrrk2, `lvs-verilator-json`) | `tileverilog`, `lvs_equiv` |
 
