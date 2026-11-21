@@ -52,6 +52,11 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "cascade wires into 64K x1 memories (LOWER/UPPER, as Vivado does), halving the LUT multiplexer "
          "behind every data bit.  An odd number of blocks is padded with one.  Needs a nextpnr that places "
          "cascaded pairs (openXC7 main since #67)."},
+        {"synth.bram_x2x4", "x2 and x4 block RAMs", OptionSpec::Bool, "1", "--map-only-bram-x2-x4", true,
+         "A memory of 4097..8192 words takes RAMB36E1s in x4 mode and one of 8193..16384 words x2, a quarter "
+         "and a half of the x1 blocks otherwise used (and of the loads on its address).  Proven through "
+         "nextpnr and on the VC707 with legend64 (a x4 boot memory, a x2 packet FIFO); an older nextpnr got "
+         "these widths wrong, hence the switch."},
         {"synth.wide_packed_mem", "Wide vectors as memories", OptionSpec::Bool, "1",
          "--struct-only-wide-packed-mem", true,
          "Treat packed vectors wider than 512 bits as flattened memories, so they can become block RAM."},
@@ -83,6 +88,12 @@ inline const std::vector<OptionSpec>& optionSpecs() {
         {"synth.max_fanout", "Largest net fanout", OptionSpec::Int, "32", "--map-only-max-fanout {}", true,
          "A LUT or register driving more loads than this is copied until none does (0: no limit).  "
          "32 when timing analysis is on and this is not set, else no limit.", "", 0, 100000},
+        {"synth.retime", "Register retiming (rounds)", OptionSpec::Int, "4", "--map-only-retime {}", true,
+         "After the timing-driven passes, move logic across flip-flops from the late side to the side with "
+         "time in hand, forward (a LUT reading only flip-flops of one clock, enable and reset goes in front "
+         "of them) or backward (a late flip-flop goes behind the LUT that drives it); each round is kept "
+         "only if the analysis of the result is better.  Retimed flip-flops are named _fret / _bret and no "
+         "longer pair by name with the source's registers.  Needs timing analysis on.", "", 0, 32},
         {"synth.timing_margin", "Timing margin (ns)", OptionSpec::Real, "1", "--map-only-timing-margin {}", true,
          "How much the timing-driven passes aim to beat the constraints by, leaving room for routing; "
          "a fifth of the period when not set.", "", 0, 100},
@@ -155,6 +166,10 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "router2's alternate cost weights."},
         {"pnr.hold_fix", "Hold fixing (passes)", OptionSpec::Int, "8", "-o hold-fix={}", true,
          "After routing, fix hold violations by detours or feedthrough LUTs.", "", 1, 100},
+        {"pnr.chipdb", "Chip database", OptionSpec::Text, "", "--chipdb {}", true,
+         "A chip database to use in place of nextpnr's own for the device, e.g. one generated with the "
+         "silicon-calibrated delays (xilinx_gen.py --timing-cal): typical delays of the part measured, for "
+         "steering placement and routing, not for sign-off."},
         {"pnr.seed", "Seed", OptionSpec::Int, "1", "--seed {}", true,
          "Seed for the placer's random choices.", "", 0, 1e9},
         {"pnr.freq", "Target frequency (MHz)", OptionSpec::Real, "100", "--freq {}", true,
