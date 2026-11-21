@@ -26,8 +26,8 @@ with `--emit` rewrites `calc_init.svh`.
 
 Differences from the original build:
 
-- The clock is the 200 MHz SYSCLK (`top_min.xdc`), not the 156.25 MHz
-  USER_CLOCK (`top_min_uc.xdc`, `USE_USERCLK`).  USER_CLOCK is on a left-side HP
+- The clock is the 200 MHz SYSCLK (`top_min.xdc`) through an MMCM to 100 MHz, not the 156.25 MHz
+  USER_CLOCK (`top_min_uc.xdc`, `USE_USERCLK`, which still clocks the design directly).  USER_CLOCK is on a left-side HP
   bank (LIOB18), and nextpnr has no FASM key for a differential input there.
   The old flow only used USER_CLOCK because it could not reach 200 MHz.
 - `xil_bb.v` is not needed: the project's Xilinx cell models declare the
@@ -41,3 +41,10 @@ On the VC707 (2026-10-21) it answers `12+34=46`, `355000000/113=3141592` and
 `65535*65535=4294836225` and `123*456=56088` with no `?` (DSP and software
 agree).  nextpnr reports 279 MHz; OpenSTA on the same SDF finds a
 15-LUT path from the RX FIFO to the accumulator at about 142 MHz.
+
+Since 2026-11-21 the core clock is 100 MHz, from an MMCM (`top_min.sv`; the UART's 16x divider
+is 54, 115741 baud). nextpnr now times the paths a block RAM read launches, which it used to
+leave out: with them the design routes at about 175 MHz, short of the 200 MHz it ran at, and
+the 279 MHz reported before was never its speed. At 100 MHz it routes at 148 MHz. OpenSTA on
+the routed SDF reports a hold violation of about 0.48 ns into the RAM's data input (DIADI2,
+behind a hold-fix buffer) that nextpnr does not, at 100 MHz as at 200.

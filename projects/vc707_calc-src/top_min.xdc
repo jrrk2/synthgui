@@ -4,6 +4,9 @@ set_property PACKAGE_PIN E18 [get_ports sysclk_n]
 set_property IOSTANDARD LVDS [get_ports sysclk_p]
 set_property IOSTANDARD LVDS [get_ports sysclk_n]
 create_clock -period 5.000 -name sysclk [get_ports sysclk_p]
+# the core clock is the MMCM's 100 MHz (top_min.sv); the placement vc707_bramtest's clkgen uses
+set_property LOC MMCME2_ADV_X1Y5 [get_cells mmcm]
+set_property LOC BUFGCTRL_X0Y16 [get_cells bufg]
 
 
 # CPU_RESET button (active-high pressed).

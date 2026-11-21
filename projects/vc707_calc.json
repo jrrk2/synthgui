@@ -26,7 +26,8 @@
     "IBUFDS",
     "IBUF",
     "OBUF",
-    "DSP48E1"
+    "DSP48E1",
+    "MMCME2_ADV"
   ],
   "verilator": "{prefix}/bin/verilator_bin",
   "verilator_root": "{prefix}/share/verilator",
