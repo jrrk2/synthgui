@@ -331,18 +331,18 @@ app, and drafts one GitHub release with the archives and their SHA-256 sums; the
 ## Code signing policy
 
 Windows releases are built from this repository's source by `.github/workflows/windows-release.yml` on GitHub-hosted
-runners, and are to be signed by [SignPath Foundation](https://signpath.org) through [SignPath.io](https://signpath.io)
-(applied for; until then the Windows zip is unsigned and says so in its release notes). Only synthgui's own program,
-`bin/synthgui.exe`, is signed. The tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader,
-fasm2netlist) and the MINGW64 and Qt libraries are other projects' builds, made from source in the same workflow, and
-are not signed.
+runners. synthgui's own program, `bin/synthgui.exe`, is then signed by hand, as part of approving the draft release
+(`scripts/approve-release.sh`), with a Certum Open Source Code Signing certificate issued to "Open Source Developer
+Jonathan Kimmitt"; the key is held in Certum's cloud and each signing session is opened with a one-time code. The
+tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader, fasm2netlist) and the MINGW64 and Qt
+libraries are other projects' builds, made from source in the same workflow, and are not signed.
 
 Team roles:
 
 - Committers and reviewers: Jonathan Kimmitt (jrrk2)
 - Approvers: Jonathan Kimmitt (jrrk2)
 
-Every signing request is approved by hand.
+Every release is signed and approved by hand.
 
 Privacy policy: this program will not transfer any information to other networked systems unless specifically
 requested by the user or the person installing or operating it.

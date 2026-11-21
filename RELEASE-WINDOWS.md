@@ -32,7 +32,7 @@ built cached between runs (only MSYS2's own packages are installed):
 | `tools` | CUDD, prjxray's `xc7frames2bit`, fasm2netlist, OpenSTA, openFPGALoader (with libusb, hidapi, libftdi) | about 13 min |
 | `verilator` | Verilator with ABC (the synthesis fork) | about 28 min |
 | `nextpnr` | nextpnr-himbaechel, and both chip databases generated from prjxray-db | about 17 min |
-| `package` | synthgui, `scripts/package-windows.sh`, signing, the zip, the draft release | about 5 min, plus the wait for a signing approval |
+| `package` | synthgui, `scripts/package-windows.sh`, the zip, the draft release | about 5 min |
 
 The first three run in parallel; a whole run took 33 minutes. The runners are real x86-64 Windows VMs (4 CPUs, 16 GB),
 not emulated: Windows is slow at builds that start many processes (MSYS2 emulates `fork`) and touch many small files.
@@ -66,33 +66,33 @@ folder, and with neither MSYS2 nor bash available (for example `PATH` set to `C:
 The run of 2026-10-24 (40110127725) passed all of it on Windows 11 with Smart App Control on, except *program*, which
 needed the Sonata plugged in. Its xc7vx485t chip database came out byte-identical to the one in the macOS 0.1.1 release.
 
-## Signing (SignPath Foundation)
+## Signing (Certum, at approval)
 
-Applied for on 2026-10-24; SignPath accepts projects depending on their reputation. Until then the zip is unsigned,
-and its release notes must say so.
+`bin/synthgui.exe` is signed with a Certum Open Source Code Signing certificate ("Open Source Developer Jonathan
+Kimmitt", issued by Certum Code Signing 2021 CA). The key stays in Certum's cloud and is reached through SimplySign
+Desktop, which needs a one-time code from the SimplySign mobile app for each session, so the signature is not made on
+a GitHub runner: the workflow builds an unsigned zip into a draft release, and approving the draft signs it.
 
-What SignPath requires, and where it is met:
+    scripts/approve-release.sh v0.1.4 --dry-run     # check and sign into a work directory, GitHub untouched
+    scripts/approve-release.sh v0.1.4               # sign, replace the draft's zip, SHA256SUMS and notes
+    scripts/approve-release.sh v0.1.4 --publish     # the same (signed programs are left alone), then publish
 
-- An OSI-approved licence for all components: GPL-3.0 (`LICENSE`); bundled files keep their own compatible licences.
-- A "Code signing policy" on the project's home page: the README section of that name.
-- Builds from source on GitHub-hosted runners, the artifact uploaded by the workflow, manual approval of each signing
-  request: the workflow above.
-- Only the project's own binaries are signed: `.signpath/artifact-configuration.xml` signs `bin/synthgui.exe`. The other
-  projects' tools and the DLLs are bundled unsigned, which their terms allow. fasm2netlist (`tileverilog`,
-  `lvs_equiv`) is jrrk2's own project and can be added there if SignPath agrees it counts.
-- Multi-factor authentication on GitHub and SignPath for everyone on the team.
+It checks the draft's archives against its SHA256SUMS, signs (`scripts/sign-windows.sh`: SHA-256, Certum's timestamp,
+the issuing certificate embedded, the result verified), rebuilds the zip with every other entry byte for byte as it
+was, and rewrites the sums. `--sign 'build-deps/fasm2netlist/*.exe'` signs more than synthgui.exe.
 
-When the project is accepted:
+On the approver's Linux machine:
 
-1. Install the SignPath GitHub App on the repository.
-2. In SignPath: link the project to the predefined *GitHub.com* trusted build system, and paste
-   `.signpath/artifact-configuration.xml` as its artifact configuration.
-3. In the repository settings: secret `SIGNPATH_API_TOKEN`; variables `SIGNPATH_ORGANIZATION_ID`,
-   `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` (and `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` if not the
-   project's default). With the variables set, the workflow submits the package, waits up to five hours for the
-   approval, checks the signature on `synthgui.exe` (`Get-AuthenticodeSignature`) and zips the signed folder.
-4. In the README's *Code signing policy*, replace "applied for; until then the Windows zip is unsigned" with SignPath's
-   attribution: "Free code signing provided by SignPath.io, certificate by SignPath Foundation".
+- SimplySign Desktop (Certum's Linux package), running and logged in. It was built against libxml2 2.9: on a
+  distribution that has only libxml2.so.16 (Ubuntu 26.04), put Ubuntu 24.04's `libxml2.so.2` and the libicu 74
+  libraries it needs into `/opt/SimplySignDesktop`.
+- `osslsigncode` (2.6 or later), OpenSC's `pkcs11-tool` and OpenSSL's `pkcs11-provider`, installed or unpacked under
+  `SIGN_ROOT`. osslsigncode's older pkcs11 engine crashes with Certum's module; the provider works.
+- No PIN is asked once SimplySign Desktop is logged in: anything running as that user can sign until it is logged
+  out. Log out after a release.
+
+The workflow still has its SignPath step (it runs only when the SignPath variables are set); SignPath Foundation was
+applied to on 2026-10-24 and would sign on the runner with its own certificate, if that route is wanted later.
 
 Why signing matters: Windows 11's Smart App Control judges unsigned programs one by one and can block any of them, and
 a user cannot allow a single program, only turn Smart App Control off (and Windows only lets it back on after a reset).
