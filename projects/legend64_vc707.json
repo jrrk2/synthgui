@@ -1,0 +1,132 @@
+{
+  "blackboxes": [
+    "BUFG",
+    "FDCE",
+    "FDPE",
+    "GTXE2_CHANNEL",
+    "IBUFDS",
+    "IBUFDS_GTE2",
+    "IDELAYCTRL",
+    "IDELAYE2",
+    "IOBUF",
+    "IOBUFDS",
+    "ISERDESE2",
+    "MMCME2_ADV",
+    "MMCME2_BASE",
+    "OBUFDS",
+    "ODELAYE2",
+    "OSERDESE2",
+    "PLLE2_ADV"
+  ],
+  "capacity": {
+    "BUFG": 32,
+    "DSP": 2800,
+    "FF": 607200,
+    "IO": 700,
+    "LUT": 303600,
+    "LUTRAM": 130800,
+    "RAMB36": 1030
+  },
+  "defines": [
+    "SYNTHESIS"
+  ],
+  "device": "xc7vx485t",
+  "family": "virtex7",
+  "incdirs": [
+    "{root}/projects/legend64_vc707-src"
+  ],
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "name": "legend64 RV64GC on the VC707 (LiteDRAM, SGMII)",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "nextpnr_flags": "--placer-heap-timingweight 100 --placer-heap-congestion-spread -o 'delay-matrix={root}/projects/vc707_romlinux-src/delay-matrix-xc7vx485t.txt' --router router2 -o hold-fix=8 --timing-allow-fail",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "options": {
+    "pnr.allow_fail": "1",
+    "pnr.cong_spread": "1",
+    "pnr.delay_matrix": "{root}/projects/vc707_romlinux-src/delay-matrix-xc7vx485t.txt",
+    "pnr.hold_fix": "8",
+    "pnr.router": "router2",
+    "pnr.timingweight": "100",
+    "pnr.clock_tree": "on",
+    "pnr.bram_place": "on",
+    "synth.warn.WIDTHTRUNC": "1",
+    "synth.warn.WIDTHEXPAND": "1",
+    "synth.warn.MULTIDRIVEN": "1",
+    "synth.warn.BLKANDNBLK": "1",
+    "synth.warn.PINMISSING": "1",
+    "synth.warn.UNOPTFLAT": "1",
+    "synth.warn.TIMESCALEMOD": "1",
+    "synth.warn.SPECIFYIGN": "1"
+  },
+  "part": "xc7vx485tffg1761-2",
+  "prjxray_db": "{deps}/prjxray-db",
+  "sources": [
+    "{root}/projects/legend64_vc707-src/legend64.sv",
+    "{root}/projects/legend64_vc707-src/legend64_rvc.sv",
+    "{root}/projects/legend64_vc707-src/legend64_fpu.sv",
+    "{root}/projects/legend64_vc707-src/legend_uart16550.sv",
+    "{root}/projects/legend64_vc707-src/legend_plic.sv",
+    "{root}/projects/legend64_vc707-src/legend_eth.sv",
+    "{root}/projects/legend64_vc707-src/legend_ram.sv",
+    "{root}/projects/legend64_vc707-src/legend_cache.sv",
+    "{root}/projects/legend64_vc707-src/litedram_line_adapter.sv",
+    "{root}/projects/legend64_vc707-src/legend64_soc.sv",
+    "{root}/projects/legend64_vc707-src/legend_sgmii.sv",
+    "{root}/projects/legend64_vc707-src/legend64_vc707.sv",
+    "{root}/projects/legend64_vc707-src/legend_flash.sv",
+    "{root}/projects/legend64_vc707-src/litedram_core_open.v",
+    "{root}/projects/vc707_ethmin-src/liteeth_sgmii_phy.v",
+    "{root}/projects/vc707_ethmin-src/eth_mac_1g.sv",
+    "{root}/projects/vc707_ethmin-src/axis_gmii_rx.sv",
+    "{root}/projects/legend64_vc707-src/axis_gmii_tx.sv",
+    "{root}/projects/vc707_ethmin-src/rgmii_lfsr.sv"
+  ],
+  "srcdir": "{root}/projects/legend64_vc707-src",
+  "sta": "{prefix}/bin/sta",
+  "steps": [
+    {
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {params} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
+      "id": "synth",
+      "label": "Synthesize"
+    },
+    {
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}",
+      "id": "pnr",
+      "label": "Place & Route"
+    },
+    {
+      "id": "fom",
+      "label": "Block RAM merit",
+      "command": "{bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+    },
+    {
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "id": "sta",
+      "label": "OpenSTA"
+    },
+    {
+      "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {lvs_equiv} --gold {json} --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --db {prjxray_db}/{family} --device {device} --quiet",
+      "id": "lvs",
+      "label": "LVS"
+    },
+    {
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}",
+      "id": "bit",
+      "label": "Bitstream"
+    },
+    {
+      "command": "{openfpgaloader} --cable digilent --freq 15000000 {bit}",
+      "id": "program",
+      "label": "Program"
+    }
+  ],
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
+  "top": "legend64_vc707",
+  "verilator": "{prefix}/bin/verilator_bin",
+  "verilator_root": "{prefix}/share/verilator",
+  "work": "~/synthgui-work/legend64_vc707",
+  "xdc": "{root}/projects/legend64_vc707-src/legend64_vc707_open.xdc",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "bram_fom_budget": "6100/5400",
+  "params": "-GLITEDRAM=1 -GSYS_DIV=40.000 -GCLK_HZ=25000000 -GBUILD_ID=24064 -GRECONFIG=0 -GCACHE_LINES_LOG2=10 -GTLB_ENTRIES=8 -GBOOT_HEX='\"{root}/projects/legend64_vc707-src/boot.hex\"' --map-only-sdc {root}/projects/legend64_vc707-src/legend64_vc707_synth.sdc --map-only-pins {root}/projects/legend64_vc707-src/legend64_vc707_open.xdc --map-only-timing-report legend64_vc707_timing.rpt --map-only-timing-iterations 2 --map-only-max-fanout 32"
+}

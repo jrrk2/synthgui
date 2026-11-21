@@ -1,0 +1,116 @@
+From 06d69360fe4aa9fbb206f28bef5843bdf48e32d2 Mon Sep 17 00:00:00 2001
+From: Jonathan Kimmitt <jonathan@kimmitt.co.uk>
+Date: Fri, 20 Nov 2026 14:11:04 +0000
+Subject: [PATCH 6/6] map: initial contents of distributed RAM and of arrays
+ kept as registers
+
+A memory with asynchronous reads becomes RAM64X1D cells, whose INIT was
+always written as zero, and a small array kept as registers had no INIT_VAL
+on its flip-flops: an initial block (or $readmemh) that fills either was
+dropped without a message, while the same memory as a block RAM kept it.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K8G5YLpQeRs8Wnku9VnMre
+---
+ src/V3EmitMap.cpp    | 22 +++++++++++++++++++++-
+ src/V3EmitStruct.cpp | 28 +++++++++++++++++++---------
+ 2 files changed, 40 insertions(+), 10 deletions(-)
+
+diff --git a/src/V3EmitMap.cpp b/src/V3EmitMap.cpp
+index 46eb6f2..785a7d7 100644
+--- a/src/V3EmitMap.cpp
++++ b/src/V3EmitMap.cpp
+@@ -5081,6 +5081,26 @@ private:
+             const auto it = pins.outs.find(name);
+             return it == pins.outs.end() ? std::vector<std::string>{} : it->second;
+         };
++        // Initial contents (an initial block's image, or $readmemh INIT_FILE on the primitive):
++        // bit b of word k is INIT bit k % 64 of bit b's cell for block k / 64
++        std::vector<uint64_t> image = pins.image;
++        for (const auto& p : c.params) {
++            if (pins.hasImage || p.first != "INIT_FILE") continue;
++            std::string f = p.second;
++            if (f.size() >= 2 && f.front() == '"') f = f.substr(1, f.size() - 2);
++            if (f.empty()) continue;
++            if (!readHex(f, image))
++                v3error("Synthesis: " << "memory " + c.name + ": INIT_FILE " + f
++                                             + " not readable; contents left 0");
++        }
++        const auto initOf = [&](int b, int d) {
++            std::string bits(64, '0');  // MSB first
++            for (int i = 0; i < 64; ++i) {
++                const size_t k = static_cast<size_t>(d) * 64 + i;
++                if (b < 64 && k < image.size() && ((image[k] >> b) & 1)) bits[63 - i] = '1';
++            }
++            return "\"" + bits + "\"";
++        };
+         const bool sp = c.type == "memory_sp" || c.type == "memory_sp_sync";
+         const std::string clk = pinNets("clk").empty() ? "\"0\"" : pinNets("clk")[0];
+         const std::vector<std::string> we = pinNets("we");
+@@ -5164,7 +5184,7 @@ private:
+                     cell("RAM64X1D",
+                          sanitize(c.name) + "_r" + std::to_string(r) + "_b" + std::to_string(b)
+                              + "_d" + std::to_string(d),
+-                         {{"INIT", "\"" + std::string(64, '0') + "\""}}, ins,
++                         {{"INIT", initOf(b, d)}}, ins,
+                          {{"SPO", "[" + newNet() + "]"}, {"DPO", "[" + dpo + "]"}});
+                 }
+                 if (nblk > 1) muxTree(blk, rhi, rdata[b]);
+diff --git a/src/V3EmitStruct.cpp b/src/V3EmitStruct.cpp
+index a34a374..b3e4b18 100644
+--- a/src/V3EmitStruct.cpp
++++ b/src/V3EmitStruct.cpp
+@@ -1568,12 +1568,7 @@ private:
+         // A register with a declaration value (`reg [3:0] n = 4'd12;`) powers
+         // up there on an FPGA: the value goes onto its register cells as
+         // INIT_VAL (the slice a cell holds, when the register was split)
+-        for (const auto& kv : m_staticInits) {
+-            if (!written.count(kv.first) || kv.second->num().width() > 64
+-                || kv.second->num().isFourState())
+-                continue;
+-            const uint64_t v = kv.second->num().toUQuad();
+-            if (!v) continue;
++        const auto powerUp = [&](const std::string& name, const uint64_t v) {
+             for (SItem& it : m_items) {
+                 if (it.kind != SItem::CELL || (it.prim != "dff_en" && it.prim != "dffn_en"))
+                     continue;
+@@ -1582,11 +1577,11 @@ private:
+                     const std::string& e = pin.expr;
+                     int lo = -1;
+                     int w = -1;
+-                    if (e == kv.first) {
++                    if (e == name) {
+                         lo = 0;
+-                    } else if (e.compare(0, kv.first.size() + 1, kv.first + "[") == 0) {
++                    } else if (e.compare(0, name.size() + 1, name + "[") == 0) {
+                         int a = 0, b = 0;
+-                        const char* rest = e.c_str() + kv.first.size() + 1;
++                        const char* rest = e.c_str() + name.size() + 1;
+                         if (std::sscanf(rest, "%d +: %d]", &a, &b) == 2) {
+                             lo = a;
+                             w = b;
+@@ -1604,6 +1599,21 @@ private:
+                     if (part) it.params.emplace_back("INIT_VAL", std::to_string(part));
+                 }
+             }
++        };
++        for (const auto& kv : m_staticInits) {
++            if (!written.count(kv.first) || kv.second->num().width() > 64
++                || kv.second->num().isFourState())
++                continue;
++            const uint64_t v = kv.second->num().toUQuad();
++            if (v) powerUp(kv.first, v);
++        }
++        // Likewise an array kept as registers that an initial block fills
++        for (const auto& kv : m_mems) {
++            const SMem& m = kv.second;
++            if (!m.asRegs || !m.hasInitWords) continue;
++            for (size_t k = 0; k < m.regNames.size() && k < m.initWords.size(); ++k) {
++                if (m.initWords[k]) powerUp(m.regNames[k], m.initWords[k]);
++            }
+         }
+         for (const auto& kv : m_staticInits) {
+             if (written.count(kv.first)) continue;
+-- 
+2.53.0
+
