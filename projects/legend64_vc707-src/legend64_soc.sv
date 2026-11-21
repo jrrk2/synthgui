@@ -109,11 +109,24 @@ module legend64_soc #(
   assign d_mmio = !d_boot && !d_ddr;
 
   // ------------------------------------------------------------------ boot memory
+  // The instruction port takes its address from a register: the fetch address comes late out of
+  // the execute stage (a redirect) and the memory's block RAMs are spread out, and nothing that
+  // matters for speed runs from here. A fetch from the boot memory is accepted at once and
+  // occupies the next cycle (bi_v), during which the instruction bus accepts nothing, so its
+  // answer cannot meet a later fetch's: the instruction two cycles after the request.
   logic [63:0] boot_iq, boot_dq;
   logic        boot_i_rv, boot_i_hi, boot_d_rv, none_i_rv;
+  logic        bi_v, bi_hi, i_req;
+  logic [12:0] bi_addr;
+  assign i_req = imem_req && !bi_v;
+  always_ff @(posedge clk) begin
+    bi_v    <= i_req && i_boot && core_rst_n;
+    bi_hi   <= imem_addr[2];
+    bi_addr <= imem_addr[15:3];
+  end
   legend_tdp_be #(.AW(13), .NB(8), .INIT_FILE(BOOT_HEX)) u_boot (
       .clk,
-      .a_addr(imem_addr[15:3]), .a_q(boot_iq),
+      .a_addr(bi_addr), .a_q(boot_iq),
       .b_addr(dmem_addr[15:3]), .b_we((dmem_req && dmem_we && d_boot) ? dmem_be : 8'h00),
       .b_d(dmem_wdata), .b_q(boot_dq)
   );
@@ -128,7 +141,7 @@ module legend64_soc #(
   logic [7:0]  e_be;
   legend_cache #(.LINES_LOG2(CACHE_LINES_LOG2)) u_cache (
       .clk, .rst(!core_rst_n),
-      .i_req(imem_req && i_ddr), .i_addr(imem_addr[29:0]), .i_gnt(c_i_gnt), .i_rvalid(c_i_rvalid), .i_rdata(c_i_rdata),
+      .i_req(i_req && i_ddr), .i_addr(imem_addr[29:0]), .i_gnt(c_i_gnt), .i_rvalid(c_i_rvalid), .i_rdata(c_i_rdata),
       .d_req(dmem_req && d_ddr), .d_we(dmem_we), .d_addr(dmem_addr[29:0]), .d_wdata(dmem_wdata), .d_be(dmem_be),
       .d_gnt(c_d_gnt), .d_rvalid(c_d_rvalid), .d_rdata(c_d_rdata),
       .e_req, .e_we, .e_addr, .e_wdata, .e_be, .e_gnt, .e_rvalid, .e_rdata,
@@ -240,11 +253,11 @@ module legend64_soc #(
   end
 
   // ------------------------------------------------------------------ bus responses
-  assign imem_gnt = i_ddr ? c_i_gnt : 1'b1;
+  assign imem_gnt = bi_v ? 1'b0 : i_ddr ? c_i_gnt : 1'b1;
   always_ff @(posedge clk) begin
-    boot_i_rv <= imem_req && imem_gnt && i_boot;
-    none_i_rv <= imem_req && imem_gnt && !i_boot && !i_ddr;
-    boot_i_hi <= imem_addr[2];
+    boot_i_rv <= bi_v;
+    none_i_rv <= i_req && imem_gnt && !i_boot && !i_ddr;
+    boot_i_hi <= bi_hi;
     boot_d_rv <= dmem_req && dmem_gnt && !dmem_we && d_boot;
     if (!core_rst_n) begin boot_i_rv <= 1'b0; none_i_rv <= 1'b0; boot_d_rv <= 1'b0; boot_i_hi <= 1'b0; end
   end

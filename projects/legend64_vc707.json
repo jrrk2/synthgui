@@ -85,7 +85,7 @@
   "sta": "{prefix}/bin/sta",
   "steps": [
     {
-      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {params} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --Mdir {work}/obj {xilinx_stubs} {sources}",
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {params} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --map-only-meminit {meminit} --Mdir {work}/obj {xilinx_stubs} {sources}",
       "id": "synth",
       "label": "Synthesize"
     },
@@ -128,5 +128,5 @@
   "xdc": "{root}/projects/legend64_vc707-src/legend64_vc707_open.xdc",
   "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
   "bram_fom_budget": "6100/5400",
-  "params": "-GLITEDRAM=1 -GSYS_DIV=40.000 -GCLK_HZ=25000000 -GBUILD_ID=24064 -GRECONFIG=0 -GCACHE_LINES_LOG2=10 -GTLB_ENTRIES=8 -GBOOT_HEX='\"{root}/projects/legend64_vc707-src/boot.hex\"' --map-only-sdc {root}/projects/legend64_vc707-src/legend64_vc707_synth.sdc --map-only-pins {root}/projects/legend64_vc707-src/legend64_vc707_open.xdc --map-only-timing-report legend64_vc707_timing.rpt --map-only-timing-iterations 2 --map-only-max-fanout 32"
+  "params": "-GLITEDRAM=1 -GSYS_DIV=40.000 -GCLK_HZ=25000000 -GBUILD_ID=24064 -GRECONFIG=0 -GCACHE_LINES_LOG2=10 -GTLB_ENTRIES=8 -GBOOT_HEX='\"{root}/projects/legend64_vc707-src/boot.hex\"' --map-only-sdc {root}/projects/legend64_vc707-src/legend64_vc707_synth.sdc --map-only-pins {root}/projects/legend64_vc707-src/legend64_vc707_open.xdc --map-only-timing-report legend64_vc707_timing.rpt --map-only-timing-iterations 2 --map-only-max-fanout 32 --map-only-bram-x2-x4"
 }

@@ -1,0 +1,76 @@
+From 623b9c04bdd3dc98964b9aadba686ac949af5e23 Mon Sep 17 00:00:00 2001
+From: Dr Jonathan Richard Robert Kimmitt <jonathan@kimmitt.uk>
+Date: Sat, 21 Nov 2026 13:37:17 +0000
+Subject: [PATCH 09/10] map: x2 and x4 block RAM tiles with
+ --map-only-bram-x2-x4
+
+A memory of 4097..8192 words takes RAMB36E1s in x4 mode and one of 8193..16384 words x2,
+a quarter and a half of the x1 tiles used until now (and of the loads on its address).
+Off by default: an earlier nextpnr got these widths wrong.
+---
+ src/V3EmitMap.cpp | 11 ++++++++---
+ src/V3Options.cpp |  1 +
+ src/V3Options.h   |  2 ++
+ 3 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/V3EmitMap.cpp b/src/V3EmitMap.cpp
+index 8c7ae66..60a703f 100644
+--- a/src/V3EmitMap.cpp
++++ b/src/V3EmitMap.cpp
+@@ -4863,13 +4863,18 @@ private:
+         }
+         // Tile plan: RAMB36E1 only, in the lane widths the open flow has been
+         // seen to get right on hardware: x36 (32 data bits), x9 (8) and x1.
+-        // x2/x4 come out of nextpnr miscompiled (bytecode/fpga/vc707-ethmin
+-        // notes) and x18 / RAMB18E1 are unproven, so they are not used.
++        // x2/x4 came out of an earlier nextpnr miscompiled (bytecode/fpga/
++        // vc707-ethmin notes), so they are used only with
++        // --map-only-bram-x2-x4: a memory of 4097..8192 words then takes x4
++        // tiles and one of 8193..16384 words x2, a quarter and a half of the
++        // x1 tiles it would otherwise need (and of the loads on its address).
++        // x18 / RAMB18E1 are unproven and not used.
+         // Deeper memories use x1 lanes in 32K blocks with a registered block
+         // select (tdp_ram32's scheme).
+         int tw = 1;
+         const char* prim = "RAMB36E1";
+-        for (const int cand : {32, 8, 1}) {
++        for (const int cand : {32, 8, 4, 2, 1}) {
++            if ((cand == 4 || cand == 2) && !v3Global.opt.mapOnlyBramX2X4()) continue;
+             if (32768 / cand >= depth) {
+                 tw = cand;
+                 break;
+diff --git a/src/V3Options.cpp b/src/V3Options.cpp
+index b4e2cae..0870c4a 100644
+--- a/src/V3Options.cpp
++++ b/src/V3Options.cpp
+@@ -1665,6 +1665,7 @@ void V3Options::parseOptsList(FileLine* fl, const string& optdir, int argc,
+     DECL_OPTION("-map-only-abc-script", Set, &m_mapOnlyAbcScript);
+     DECL_OPTION("-map-only-keep-temps", OnOff, &m_mapOnlyKeepTemps);
+     DECL_OPTION("-map-only-bram-cascade", OnOff, &m_mapOnlyBramCascade);
++    DECL_OPTION("-map-only-bram-x2-x4", OnOff, &m_mapOnlyBramX2X4);
+     DECL_OPTION("-map-only-no-iobuf", OnOff, &m_mapOnlyNoIobuf);
+     DECL_OPTION("-map-only-no-wide-lut", OnOff, &m_mapOnlyNoWideLut);
+     DECL_OPTION("-map-only-keep-equivalent-registers", OnOff, &m_mapOnlyKeepEquivRegs);
+diff --git a/src/V3Options.h b/src/V3Options.h
+index 95acd85..697f272 100644
+--- a/src/V3Options.h
++++ b/src/V3Options.h
+@@ -313,6 +313,7 @@ private:
+     bool m_mapOnlyWholeProgram = false;  // main switch: --map-only-whole-program
+     int m_mapOnlyPartitionMin = 1000;  // main switch: --map-only-partition-min
+     bool m_mapOnlyBramCascade = false;  // main switch: --map-only-bram-cascade
++    bool m_mapOnlyBramX2X4 = false;  // main switch: --map-only-bram-x2-x4
+     bool m_mapOnlyNoIobuf = false;  // main switch: --map-only-no-iobuf
+     bool m_mapOnlyNoWideLut = false;  // main switch: --map-only-no-wide-lut
+     bool m_mapOnlyKeepEquivRegs = false;  // main switch: --map-only-keep-equivalent-registers
+@@ -785,6 +786,7 @@ public:
+     bool mapOnlyWholeProgram() const { return m_mapOnlyWholeProgram; }
+     int mapOnlyPartitionMin() const { return m_mapOnlyPartitionMin; }
+     bool mapOnlyBramCascade() const { return m_mapOnlyBramCascade; }
++    bool mapOnlyBramX2X4() const { return m_mapOnlyBramX2X4; }
+     bool mapOnlyNoIobuf() const { return m_mapOnlyNoIobuf; }
+     bool mapOnlyNoWideLut() const { return m_mapOnlyNoWideLut; }
+     bool mapOnlyKeepEquivRegs() const { return m_mapOnlyKeepEquivRegs; }
+-- 
+2.53.0
+

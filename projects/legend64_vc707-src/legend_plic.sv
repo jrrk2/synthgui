@@ -27,11 +27,25 @@ module legend_plic #(
   logic [5:0]           best [2];
   logic [PRIO_BITS-1:0] best_prio [2];
 
+  // The highest-priority pending and enabled source of each context, the lowest numbered among
+  // equals; none (0) if every candidate has priority 0. A balanced tree of pairwise choices: a
+  // chain through the sources one after another was 80 logic levels deep.
+  localparam int LEAVES = 1 << $clog2(NSRC + 1);
+  logic [PRIO_BITS-1:0] tree_p [2][2*LEAVES];
+  logic [5:0]           tree_i [2][2*LEAVES];
   always_comb begin
     for (int c = 0; c < 2; c++) begin
-      best[c] = '0; best_prio[c] = '0;
-      for (int i = 1; i <= NSRC; i++)
-        if (pending[i] && enable[c][i] && prio[i] > best_prio[c]) begin best[c] = 6'(i); best_prio[c] = prio[i]; end
+      tree_p[c][0] = '0; tree_i[c][0] = '0;
+      for (int i = 0; i < LEAVES; i++) begin
+        tree_p[c][LEAVES + i] = (i >= 1 && i <= NSRC && pending[i > NSRC ? 0 : i] && enable[c][i > NSRC ? 0 : i]) ? prio[i > NSRC ? 0 : i] : '0;
+        tree_i[c][LEAVES + i] = 6'(i);
+      end
+      for (int n = LEAVES - 1; n >= 1; n--) begin
+        if (tree_p[c][2*n] >= tree_p[c][2*n + 1]) begin tree_p[c][n] = tree_p[c][2*n];     tree_i[c][n] = tree_i[c][2*n]; end
+        else                                      begin tree_p[c][n] = tree_p[c][2*n + 1]; tree_i[c][n] = tree_i[c][2*n + 1]; end
+      end
+      best_prio[c] = tree_p[c][1];
+      best[c]      = tree_p[c][1] == '0 ? 6'd0 : tree_i[c][1];
     end
   end
 

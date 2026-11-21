@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // legend64_fpu: IEEE 754 single and double precision unit for the F and D extensions.
 //
-// Multi-cycle and unpipelined: the core holds the instruction and its operands steady from
-// `start` until `done && accept`. All arithmetic funnels into one back end:
+// Multi-cycle: the core holds the instruction steady from `start` until `done && accept`. The
+// operands are captured, unpacked, in the start cycle, and every later step works from
+// registers, one wide operation to a cycle:
 //
-//   front end (FMA / divide / square root / conversions)
+//   IDLE   capture the unpacked operands
+//   PREP   FMA: the mantissa product, and the addend aligned to it
+//          divide, square root, conversions: set up; float to integer: the whole conversion
+//   ADD    FMA: the sum or the difference (both differences side by side, one carry chain deep)
+//   DIV / SQRT   one bit a cycle
 //        -> an exact unsigned integer INT with a binary scale: value = INT * 2^base
-//        -> NORM  (find the leading one, keep 64 bits plus sticky)
-//        -> ROUND (round to the target format, detect overflow/underflow, pack)
+//   NORM   find the leading one, keep 64 bits plus sticky
+//   ROUND  round to the target format, detect overflow/underflow, pack, into a register
+//   DONE   the result, until the core takes it
 //
 // fadd, fsub and fmul run through the fused multiply-add datapath (a*1+c, a*b+0), so there is
 // one adder and one rounding path to get right. Compares, sign injection, min/max, classify,
-// moves and float-to-integer conversion are combinational and finish in the start cycle.
+// moves and the special cases (NaN, infinity, zero) are combinational and finish in the start
+// cycle.
 
 module legend64_fpu (
     input  logic        clk,
@@ -164,13 +171,17 @@ module legend64_fpu (
   assign Asrc = unpack(a_raw, !dbl);   // fcvt.s.d / fcvt.d.s read the other format
 
   // FMA operand selection: result = (-1)^neg_p * (ma * mb) + (-1)^neg_c * mc
+  // The captured operands, which everything sequenced works from
+  fp_t         Aq, Bq, Cq, Asq;
+  logic [63:0] x_q;
+
   fp_t  M1, M2, M3;
   logic p_sign, c_sign;
   always_comb begin
-    M1 = A; M2 = B; M3 = C;
+    M1 = Aq; M2 = Bq; M3 = Cq;
     if (is_add || is_sub) begin
       M2 = '0; M2.mant = 53'h10_0000_0000_0000;   // 1.0
-      M3 = B;
+      M3 = Bq;
     end
     p_sign = M1.sign ^ M2.sign ^ (op_fma_enc & insn[3]);          // fnmsub, fnmadd negate the product
     c_sign = M3.sign ^ (op_fma_enc ? insn[2] : is_sub);            // fmsub, fnmadd subtract c
@@ -179,13 +190,31 @@ module legend64_fpu (
       c_sign = p_sign;   // adding a like-signed zero leaves the product, including its zero sign
     end
   end
-  logic p_zero, p_inf, fma_nv, fma_nan, fma_inf;
+  logic p_zero;
   assign p_zero  = M1.zero | M2.zero;
-  assign p_inf   = M1.inf | M2.inf;
-  assign fma_nv  = M1.snan | M2.snan | M3.snan | (M1.inf & M2.zero) | (M1.zero & M2.inf) |
-                   (p_inf & !M1.nan & !M2.nan & M3.inf & (p_sign ^ c_sign));
-  assign fma_nan = M1.nan | M2.nan | M3.nan | fma_nv;
-  assign fma_inf = p_inf | M3.inf;
+
+  // The special cases are decided in the start cycle, from the operands as they arrive: the
+  // same selection on A, B and C.
+  fp_t  S1, S2, S3;
+  logic sp_sign, sc_sign, p_inf, fma_nv, fma_nan, fma_inf;
+  always_comb begin
+    S1 = A; S2 = B; S3 = C;
+    if (is_add || is_sub) begin
+      S2 = '0; S2.mant = 53'h10_0000_0000_0000;
+      S3 = B;
+    end
+    sp_sign = S1.sign ^ S2.sign ^ (op_fma_enc & insn[3]);
+    sc_sign = S3.sign ^ (op_fma_enc ? insn[2] : is_sub);
+    if (is_mul) begin
+      S3 = '0; S3.zero = 1'b1;
+      sc_sign = sp_sign;
+    end
+  end
+  assign p_inf   = S1.inf | S2.inf;
+  assign fma_nv  = S1.snan | S2.snan | S3.snan | (S1.inf & S2.zero) | (S1.zero & S2.inf) |
+                   (p_inf & !S1.nan & !S2.nan & S3.inf & (sp_sign ^ sc_sign));
+  assign fma_nan = S1.nan | S2.nan | S3.nan | fma_nv;
+  assign fma_inf = p_inf | S3.inf;
 
   // ------------------------------------------------------------------ combinational results
   logic [63:0] comb_res;
@@ -203,7 +232,7 @@ module legend64_fpu (
     else                  a_lt_b = a_cmp[62:0] > b_cmp[62:0];
   end
 
-  // float to integer
+  // float to integer (evaluated in S_PREP, from the captured operand)
   logic [127:0] f2i_wide;
   logic [63:0]  f2i_int;
   logic [64:0]  f2i_rnd;
@@ -216,32 +245,32 @@ module legend64_fpu (
   always_comb begin
     f2i_res = '0;
     f2i_fl  = '0;
-    f2i_hi  = A.nan | !A.sign;   // NaN and positive overflow saturate high, negative low
+    f2i_hi  = Aq.nan | !Aq.sign;   // NaN and positive overflow saturate high, negative low
     f2i_v   = '0;
     f2i_unsigned = insn[20];
     f2i_long     = insn[21];
-    f2i_sh = 63 - int'(A.exp);
+    f2i_sh = 63 - int'(Aq.exp);
     if (f2i_sh > 127) f2i_sh = 127;
     if (f2i_sh < 0) f2i_sh = 0;
-    f2i_wide = {A.mant, 11'b0, 64'b0} >> f2i_sh;
-    f2i_int  = A.zero ? 64'b0 : f2i_wide[127:64];
-    f2i_rb   = !A.zero & f2i_wide[63];
-    f2i_st   = !A.zero & (|f2i_wide[62:0]);
+    f2i_wide = {Aq.mant, 11'b0, 64'b0} >> f2i_sh;
+    f2i_int  = Aq.zero ? 64'b0 : f2i_wide[127:64];
+    f2i_rb   = !Aq.zero & f2i_wide[63];
+    f2i_st   = !Aq.zero & (|f2i_wide[62:0]);
     unique case (rm)
       RNE: f2i_inc = f2i_rb & (f2i_st | f2i_int[0]);
       RTZ: f2i_inc = 1'b0;
-      RDN: f2i_inc = A.sign & (f2i_rb | f2i_st);
-      RUP: f2i_inc = !A.sign & (f2i_rb | f2i_st);
+      RDN: f2i_inc = Aq.sign & (f2i_rb | f2i_st);
+      RUP: f2i_inc = !Aq.sign & (f2i_rb | f2i_st);
       default: f2i_inc = f2i_rb;
     endcase
     f2i_rnd = {1'b0, f2i_int} + 65'(f2i_inc);
     // out of range for the destination type?
-    f2i_ovf = A.nan | A.inf | (!A.zero && int'(A.exp) > 63);
+    f2i_ovf = Aq.nan | Aq.inf | (!Aq.zero && int'(Aq.exp) > 63);
     unique case ({f2i_long, f2i_unsigned})
-      2'b00: f2i_ovf |= A.sign ? f2i_rnd > 65'h0_8000_0000 : f2i_rnd > 65'h0_7fff_ffff;
-      2'b01: f2i_ovf |= A.sign ? f2i_rnd != 0 : f2i_rnd > 65'h0_ffff_ffff;
-      2'b10: f2i_ovf |= A.sign ? f2i_rnd > 65'h0_8000_0000_0000_0000 : f2i_rnd > 65'h0_7fff_ffff_ffff_ffff;
-      2'b11: f2i_ovf |= A.sign ? f2i_rnd != 0 : f2i_rnd[64];
+      2'b00: f2i_ovf |= Aq.sign ? f2i_rnd > 65'h0_8000_0000 : f2i_rnd > 65'h0_7fff_ffff;
+      2'b01: f2i_ovf |= Aq.sign ? f2i_rnd != 0 : f2i_rnd > 65'h0_ffff_ffff;
+      2'b10: f2i_ovf |= Aq.sign ? f2i_rnd > 65'h0_8000_0000_0000_0000 : f2i_rnd > 65'h0_7fff_ffff_ffff_ffff;
+      2'b11: f2i_ovf |= Aq.sign ? f2i_rnd != 0 : f2i_rnd[64];
     endcase
     if (f2i_ovf) begin
       unique case ({f2i_long, f2i_unsigned})
@@ -252,7 +281,7 @@ module legend64_fpu (
       endcase
       f2i_fl = 5'b10000;
     end else begin
-      f2i_v   = A.sign ? -f2i_rnd[63:0] : f2i_rnd[63:0];
+      f2i_v   = Aq.sign ? -f2i_rnd[63:0] : f2i_rnd[63:0];
       f2i_res = f2i_long ? f2i_v : {{32{f2i_v[31]}}, f2i_v[31:0]};
       f2i_fl  = {4'b0, f2i_rb | f2i_st};
     end
@@ -293,9 +322,6 @@ module legend64_fpu (
         2'b01:   begin comb_res = 64'(!cb_any_nan && a_lt_b);             comb_fl = {cb_any_nan, 4'b0}; end
         default: begin comb_res = 64'(!cb_any_nan && (a_lt_b || a_eq_b)); comb_fl = {cb_any_nan, 4'b0}; end
       endcase
-    end else if (is_f2i) begin
-      comb_res = f2i_res;
-      comb_fl  = f2i_fl;
     end else if (is_mvx_class) begin
       if (f3[0]) comb_res = {54'b0, fclass};
       else       comb_res = dbl ? a_raw : {{32{a_raw[31]}}, a_raw[31:0]};
@@ -305,7 +331,7 @@ module legend64_fpu (
       comb_fl = {fma_nv, 4'b0};
       if (fma_nan) comb_res = dbl ? QNAN_D : QNAN_S;
       else begin
-        cb_s = p_inf ? p_sign : c_sign;
+        cb_s = p_inf ? sp_sign : sc_sign;
         comb_res = dbl ? {cb_s, 11'h7ff, 52'b0} : {32'hffff_ffff, cb_s, 8'hff, 23'b0};
       end
     end else if (is_div && (A.nan || B.nan || A.inf || B.inf || A.zero || B.zero)) begin
@@ -339,13 +365,15 @@ module legend64_fpu (
   end
 
   // ------------------------------------------------------------------ sequenced datapath
-  typedef enum logic [2:0] {S_IDLE, S_ADD, S_DIV, S_SQRT, S_NORM, S_ROUND} state_e;
+  typedef enum logic [3:0] {S_IDLE, S_PREP, S_ADD, S_DIV, S_SQRT, S_NORM, S_ROUND, S_DONE} state_e;
   state_e state;
 
   logic [105:0]       prod;
   logic [164:0]       int_q;    // exact magnitude
   logic signed [14:0] base_q;   // value = int_q * 2^base_q
-  logic               sign_q;
+  logic               sign_q, zsign_q;   // zsign_q: the sign of an exact zero
+  logic [63:0]        res_q;    // the result, registered
+  logic [4:0]         fl_q;
   logic [63:0]        n_mant;
   logic               n_sticky, n_zero;
   logic signed [14:0] n_exp;
@@ -356,14 +384,12 @@ module legend64_fpu (
   logic [59:0]        sq_rem;
   logic [55:0]        sq_root;
 
-  // FMA alignment and addition (evaluated in S_ADD)
+  // FMA: the addend aligned to the product (evaluated in S_PREP, beside the multiplication)
   logic signed [14:0] ep, fma_d;
-  logic               fma_clamp, fma_sub, fma_c_big;
+  logic               fma_clamp;
   logic [7:0]         fma_dcl;
   logic [325:0]       c_sh;
-  logic [163:0]       c_fr, p_fr;
-  logic [164:0]       fma_mag;
-  logic               fma_sign;
+  logic [163:0]       c_fr;
   always_comb begin
     ep        = M1.exp + M2.exp;
     fma_d     = ep - M3.exp + 15'sd56;
@@ -371,23 +397,35 @@ module legend64_fpu (
     fma_dcl   = fma_clamp ? 8'd0 : (fma_d > 15'sd163) ? 8'd163 : fma_d[7:0];
     c_sh      = {M3.zero ? 53'b0 : M3.mant, 110'b0, 163'b0} >> fma_dcl;
     c_fr      = {1'b0, c_sh[325:164], c_sh[163] | (|c_sh[162:0])};
-    p_fr      = {56'b0, p_zero ? 106'b0 : prod, 2'b0};
-    fma_sub   = p_sign ^ c_sign;
-    fma_c_big = c_fr > p_fr;
-    if (!fma_sub)       begin fma_mag = {1'b0, p_fr} + {1'b0, c_fr}; fma_sign = p_sign; end
-    else if (fma_c_big) begin fma_mag = {1'b0, c_fr} - {1'b0, p_fr}; fma_sign = c_sign; end
-    else                begin fma_mag = {1'b0, p_fr} - {1'b0, c_fr}; fma_sign = p_sign; end
-    if (fma_mag == '0) fma_sign = fma_sub ? rm == RDN : p_sign;
+  end
+  logic [163:0]       c_fr_q;
+  logic signed [14:0] fma_base_q;
+  logic               p_sign_q, c_sign_q, p_zero_q;
+
+  // FMA: the sum, or the difference (evaluated in S_ADD). Both differences are formed side by
+  // side and the borrow of one picks between them, so the magnitude is one carry chain deep.
+  logic [163:0]       p_fr;
+  logic [164:0]       fma_sum, fma_pc, fma_cp, fma_mag;
+  logic               fma_sub, fma_sign;
+  always_comb begin
+    p_fr    = {56'b0, p_zero_q ? 106'b0 : prod, 2'b0};
+    fma_sub = p_sign_q ^ c_sign_q;
+    fma_sum = {1'b0, p_fr} + {1'b0, c_fr_q};
+    fma_pc  = {1'b0, p_fr} - {1'b0, c_fr_q};      // bit 164: the addend is the larger
+    fma_cp  = {1'b0, c_fr_q} - {1'b0, p_fr};
+    if (!fma_sub)         begin fma_mag = fma_sum; fma_sign = p_sign_q; end
+    else if (fma_pc[164]) begin fma_mag = fma_cp;  fma_sign = c_sign_q; end
+    else                  begin fma_mag = fma_pc;  fma_sign = p_sign_q; end
   end
 
-  // integer to float magnitude
+  // integer to float magnitude (from the captured x)
   logic [63:0] i2f_val, i2f_mag;
   logic        i2f_neg;
   always_comb begin
     unique case (insn[21:20])
-      2'b00:   i2f_val = {{32{x_in[31]}}, x_in[31:0]};
-      2'b01:   i2f_val = {32'b0, x_in[31:0]};
-      default: i2f_val = x_in;
+      2'b00:   i2f_val = {{32{x_q[31]}}, x_q[31:0]};
+      2'b01:   i2f_val = {32'b0, x_q[31:0]};
+      default: i2f_val = x_q;
     endcase
     i2f_neg = !insn[20] && i2f_val[63];
     i2f_mag = i2f_neg ? -i2f_val : i2f_val;
@@ -405,7 +443,7 @@ module legend64_fpu (
   // divide and square-root steps
   logic [56:0] dv_sub;
   logic [59:0] sq_t, sq_trial;
-  assign dv_sub   = {1'b0, dv_r} - {4'b0, B.mant};
+  assign dv_sub   = {1'b0, dv_r} - {4'b0, Bq.mant};
   assign sq_t     = {sq_rem[57:0], sq_n[111:110]};
   assign sq_trial = {2'b0, sq_root, 2'b01};
 
@@ -418,10 +456,8 @@ module legend64_fpu (
     done = 1'b0; result = '0; flags = '0;
     if (state == S_IDLE && start && comb_op) begin
       done = 1'b1; result = comb_res; flags = comb_fl;
-    end else if (state == S_ROUND) begin
-      done = 1'b1;
-      if (n_zero) result = dbl ? {sign_q, 63'b0} : {32'hffff_ffff, sign_q, 31'b0};
-      else begin result = rp[63:0]; flags = rp[68:64]; end
+    end else if (state == S_DONE) begin
+      done = 1'b1; result = res_q; flags = fl_q;
     end
   end
 
@@ -429,47 +465,61 @@ module legend64_fpu (
   // be the output register of an FPGA's multiplier block (which has no asynchronous reset).
   always_ff @(posedge clk) begin
     if (!rst_n) prod <= '0;
-    else if (state == S_IDLE && start && !comb_op && is_fma) prod <= M1.mant * M2.mant;
+    else if (state == S_PREP && is_fma) prod <= M1.mant * M2.mant;
   end
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state <= S_IDLE;
-      int_q <= '0; base_q <= '0; sign_q <= 1'b0;
+      Aq <= '0; Bq <= '0; Cq <= '0; Asq <= '0; x_q <= '0;
+      c_fr_q <= '0; fma_base_q <= '0; p_sign_q <= 1'b0; c_sign_q <= 1'b0; p_zero_q <= 1'b0;
+      int_q <= '0; base_q <= '0; sign_q <= 1'b0; zsign_q <= 1'b0;
       n_mant <= '0; n_sticky <= 1'b0; n_zero <= 1'b0; n_exp <= '0;
+      res_q <= '0; fl_q <= '0;
       cnt <= '0; dv_q <= '0; dv_r <= '0; sq_n <= '0; sq_rem <= '0; sq_root <= '0;
     end else begin
       unique case (state)
         S_IDLE: if (start && !comb_op) begin
-          if (is_fma) begin
-            state <= S_ADD;        // the product is registered below
+          Aq <= A; Bq <= B; Cq <= C; Asq <= Asrc; x_q <= x_in;
+          state <= S_PREP;
+        end
+        S_PREP: begin
+          if (is_fma) begin        // the product is registered above
+            c_fr_q     <= c_fr;
+            fma_base_q <= fma_clamp ? M3.exp - 15'sd162 : ep - 15'sd106;
+            p_sign_q   <= p_sign; c_sign_q <= c_sign; p_zero_q <= p_zero;
+            state <= S_ADD;
           end else if (is_div) begin
-            dv_r <= {3'b0, A.mant}; dv_q <= '0; cnt <= 7'd58;
-            sign_q <= A.sign ^ B.sign;
+            dv_r <= {3'b0, Aq.mant}; dv_q <= '0; cnt <= 7'd58;
+            sign_q <= Aq.sign ^ Bq.sign;
             state <= S_DIV;
           end else if (is_sqrt) begin
-            sq_n <= A.exp[0] ? {A.mant, 1'b0, 58'b0} : {1'b0, A.mant, 58'b0};
+            sq_n <= Aq.exp[0] ? {Aq.mant, 1'b0, 58'b0} : {1'b0, Aq.mant, 58'b0};
             sq_rem <= '0; sq_root <= '0; cnt <= 7'd56;
             sign_q <= 1'b0;
             state <= S_SQRT;
           end else if (is_i2f) begin
             int_q <= {101'b0, i2f_mag}; base_q <= '0; sign_q <= i2f_neg;
             state <= S_NORM;
+          end else if (is_f2i) begin
+            res_q <= f2i_res; fl_q <= f2i_fl;
+            state <= S_DONE;
           end else begin  // float to float
-            int_q <= {112'b0, Asrc.mant}; base_q <= Asrc.exp - 15'sd52; sign_q <= Asrc.sign;
+            int_q <= {112'b0, Asq.mant}; base_q <= Asq.exp - 15'sd52; sign_q <= Asq.sign;
             state <= S_NORM;
           end
         end
         S_ADD: begin
-          int_q  <= fma_mag;
-          base_q <= fma_clamp ? M3.exp - 15'sd162 : ep - 15'sd106;
-          sign_q <= fma_sign;
-          state  <= S_NORM;
+          int_q   <= fma_mag;
+          base_q  <= fma_base_q;
+          sign_q  <= fma_sign;
+          zsign_q <= fma_sub ? rm == RDN : p_sign_q;
+          state   <= S_NORM;
         end
         S_DIV: begin
           if (cnt == 0) begin
             int_q  <= {106'b0, dv_q, dv_r != '0};
-            base_q <= A.exp - B.exp - 15'sd58;
+            base_q <= Aq.exp - Bq.exp - 15'sd58;
             state  <= S_NORM;
           end else begin
             cnt <= cnt - 7'd1;
@@ -480,7 +530,7 @@ module legend64_fpu (
         S_SQRT: begin
           if (cnt == 0) begin
             int_q  <= {108'b0, sq_root, sq_rem != '0};
-            base_q <= $signed({A.exp[14], A.exp[14:1]}) - 15'sd56;   // floor(exp / 2) - 56
+            base_q <= $signed({Aq.exp[14], Aq.exp[14:1]}) - 15'sd56;   // floor(exp / 2) - 56
             state  <= S_NORM;
           end else begin
             cnt  <= cnt - 7'd1;
@@ -494,9 +544,15 @@ module legend64_fpu (
           n_mant   <= n_shifted[164:101];
           n_sticky <= |n_shifted[100:0];
           n_exp    <= base_q + 15'(164 - nz);
+          if (nz == 165) sign_q <= zsign_q;   // an exact zero: only the FMA path gets here
           state    <= S_ROUND;
         end
-        S_ROUND: if (accept) state <= S_IDLE;
+        S_ROUND: begin
+          if (n_zero) begin res_q <= dbl ? {sign_q, 63'b0} : {32'hffff_ffff, sign_q, 31'b0}; fl_q <= '0; end
+          else        begin res_q <= rp[63:0]; fl_q <= rp[68:64]; end
+          state <= S_DONE;
+        end
+        S_DONE: if (accept) state <= S_IDLE;
         default: state <= S_IDLE;
       endcase
     end
