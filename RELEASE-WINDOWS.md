@@ -40,8 +40,7 @@ not emulated: Windows is slow at builds that start many processes (MSYS2 emulate
 Steps:
 
 1. Bump `SYNTHGUI_VERSION` in `CMakeLists.txt`: the zip's name comes from it. Commit and push.
-2. Either test first: *Actions → Windows release → Run workflow*. The zip is the run's artifact `synthgui-windows`
-   (the package folder before signing is `synthgui-windows-unsigned`).
+2. Either test first: *Actions → Windows release → Run workflow*. The zip is the run's artifact `synthgui-windows`.
 3. Or release: `git tag vX.Y.Z-windows && git push origin vX.Y.Z-windows`. The run does the same and also creates a
    **draft** release with the zip and its SHA-256.
 4. Check the zip (below), then edit the draft's notes, using the v0.1.1-windows release as the model (download line, what
@@ -91,8 +90,13 @@ On the approver's Linux machine:
 - No PIN is asked once SimplySign Desktop is logged in: anything running as that user can sign until it is logged
   out. Log out after a release.
 
-The workflow still has its SignPath step (it runs only when the SignPath variables are set); SignPath Foundation was
-applied to on 2026-10-24 and would sign on the runner with its own certificate, if that route is wanted later.
+The same by hand on a Windows PC where SimplySign is logged in, if the Linux route is not to hand: unzip the draft's
+zip, `signtool sign /fd SHA256 /tr http://time.certum.pl /td SHA256 /a bin\synthgui.exe`, `signtool verify /pa /v` it,
+zip the folder again under the same name and put it on the draft with `gh release upload TAG ZIP --clobber`, with the
+new SHA-256 in the notes.
+
+Until a release has been signed its notes say so. Only `synthgui.exe` is signed unless `--sign` adds to it; the other
+projects' tools and the DLLs are bundled unsigned.
 
 Why signing matters: Windows 11's Smart App Control judges unsigned programs one by one and can block any of them, and
 a user cannot allow a single program, only turn Smart App Control off (and Windows only lets it back on after a reset).
@@ -100,10 +104,10 @@ It blocked a stripped `openFPGALoader.exe` here while letting the unstripped one
 openFPGALoader unstripped. Signing `synthgui.exe` covers synthgui itself; the bundled tools stay unsigned until their
 own projects sign them.
 
-Other routes, looked at and not taken: Azure Artifact Signing takes individual developers only in the US and Canada,
-and its organisation validation needs a legal entity in public records, which a UK sole trader is not. A commercial
-code-signing certificate in your own name (from about $250 a year) would also work, with a signtool step in
-`package-windows.sh`. Cloudflare issues TLS certificates, not code-signing ones.
+Other routes, looked at and not taken: Azure Artifact Signing
+takes individual developers only in the US and Canada, and its organisation validation needs a legal entity in public
+records, which a UK sole trader is not. Cloudflare issues TLS certificates, not code-signing ones. A signing service with
+an API for CI would let the workflow sign by itself, if the by-hand step becomes a burden.
 
 ## Programming boards on Windows
 

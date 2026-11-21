@@ -1,0 +1,130 @@
+{
+  "blackboxes": [
+    "BUFG",
+    "FDCE",
+    "FDPE",
+    "IBUF",
+    "IBUFDS",
+    "IOBUF",
+    "MMCME2_ADV",
+    "OBUF",
+    "RAMB36E1"
+  ],
+  "capacity": {
+    "BUFG": 32,
+    "DSP": 120,
+    "FF": 65200,
+    "IO": 210,
+    "LUT": 32600,
+    "LUTRAM": 9600,
+    "RAMB36": 75
+  },
+  "defines": [
+    "SYNTHESIS"
+  ],
+  "device": "xc7a50t",
+  "incdirs": [
+    "{root}/projects/sonata_romlinux-src"
+  ],
+  "lvs_equiv": "{builds}/fasm2netlist/lvs_equiv",
+  "name": "sonata_picture",
+  "nextpnr": "{builds}/nextpnr/nextpnr-himbaechel",
+  "openfpgaloader": "{prefix}/bin/openFPGALoader",
+  "part": "xc7a50tcsg324-1",
+  "prjxray_db": "{deps}/prjxray-db",
+  "sources": [
+    "{root}/projects/sonata_romlinux-src/Ram_1w_1rs_Generic.v",
+    "{root}/projects/sonata_romlinux-src/VexRiscvLitexSmpCluster_Cc1_Iw32Is4096Iy1_Dw32Ds4096Dy1_ITs4DTs4_Ood_Wm_Rvc.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_text.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_fb_ram.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_font.v",
+    "{root}/projects/sonata_romlinux-src/rtl/lcd_init_rom.v",
+    "{root}/projects/sonata_romlinux-src/rtl/spi_buf_ram.sv",
+    "{root}/projects/sonata_romlinux-src/rtl/spi_core.sv",
+    "{root}/projects/sonata_romlinux-src/rtl/spi_wb.sv",
+    "{root}/projects/sonata_picture-src/gen_soc.v"
+  ],
+  "srcdir": "{root}/projects/sonata_picture-src",
+  "sta": "{prefix}/bin/sta",
+  "steps": [
+    {
+      "command": "MEM_INIT_DIR={srcdir} VERILATOR_ROOT={verilator_root} {verilator} -Wno-fatal --quiet {defines} {incdirs} --top-module {top} --struct-only-report {blackboxes} --map-only-output {json} --map-only-verilog {work}/{top}_mapped.v --map-only-edif {edif} --map-only-meminit {meminit} --Mdir {work}/obj {xilinx_stubs} {sources}",
+      "id": "synth",
+      "label": "Synthesize"
+    },
+    {
+      "command": "{nextpnr} --device {part} -o xdc={xdc} --json {json} -o fasm={fasm} -o placement={placement} --write {routed} --sdf {sdf} {nextpnr_flags}",
+      "id": "pnr",
+      "label": "Place & Route"
+    },
+    {
+      "id": "fom",
+      "label": "Block RAM merit",
+      "command": "{bram_fom} --netlist {json} --tilegrid {prjxray_db}/{family}/{device}/tilegrid.json --delay-matrix {delay_matrix_file} {top}={placement}"
+    },
+    {
+      "command": "{sta_prep} --json {routed} --sdf {sdf} --log {work}/pnr.log --out {work}/sta && cd {work}/sta && {sta} -no_splash -exit sta.tcl",
+      "id": "sta",
+      "label": "OpenSTA"
+    },
+    {
+      "command": "mkdir -p {work}/lvs && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --out {work}/lvs/fabric.v --model-out {work}/lvs/tile_model.v && {tileverilog} --fasm {fasm} --db {prjxray_db}/{family} --device {device} --xdc {xdc} --part {part} --placement {placement} --gold-json {json} --out {work}/lvs/fabric_named.v && {lvs_equiv} --gold {json} --gold-top {top} --gate {work}/lvs/fabric.v --gate-top fabric --placement {placement} --db {prjxray_db}/{family} --device {device} --quiet",
+      "id": "lvs",
+      "label": "LVS"
+    },
+    {
+      "command": "{fasm2frames} --part {part} --db-root {prjxray_db}/{family} {fasm} {work}/{top}.frames && {frames2bit} --part_file {prjxray_db}/{family}/{part}/part.yaml --part_name {part} --frm_file {work}/{top}.frames --output_file {bit}",
+      "id": "bit",
+      "label": "Bitstream"
+    },
+    {
+      "id": "uf2",
+      "label": "UF2",
+      "command": "{bit2uf2} {bit} {work}/{top}.bit.slot1.uf2 --slot 1"
+    },
+    {
+      "command": "{openfpgaloader} -c ft4232 {bit}",
+      "id": "program",
+      "label": "Program (JTAG)"
+    },
+    {
+      "id": "program_uf2",
+      "label": "Program (SONATA drive)",
+      "command": "cp {work}/{top}.bit.slot1.uf2 /Volumes/SONATA/ && sync"
+    }
+  ],
+  "top": "gen_soc",
+  "verilator": "{prefix}/bin/verilator_bin",
+  "verilator_root": "{prefix}/share/verilator",
+  "work": "~/synthgui-work/sonata_picture",
+  "xdc": "{root}/projects/sonata_romlinux-src/gen_soc.xdc",
+  "xilinx_stubs": "{root}/xc7/cells_sim.v {root}/xc7/cells_xtra.v",
+  "tileverilog": "{builds}/fasm2netlist/tileverilog",
+  "options": {
+    "pnr.router": "router2",
+    "pnr.allow_fail": "1",
+    "pnr.hold_fix": "8",
+    "pnr.timingweight": "100",
+    "pnr.clock_tree": "on",
+    "pnr.bram_place": "on",
+    "synth.warn.WIDTHTRUNC": "1",
+    "synth.warn.WIDTHEXPAND": "1",
+    "synth.warn.MULTIDRIVEN": "1",
+    "synth.warn.BLKANDNBLK": "1",
+    "synth.warn.PINMISSING": "1",
+    "synth.warn.UNOPTFLAT": "1",
+    "synth.warn.TIMESCALEMOD": "1",
+    "synth.warn.SPECIFYIGN": "1",
+    "pnr.cong_spread": "1"
+  },
+  "family": "artix7",
+  "nextpnr_flags": "--placer-heap-timingweight 100 --placer-heap-congestion-spread --router router2 -o hold-fix=8 --timing-allow-fail",
+  "picture": "{srcdir}/pictures/sonata-logo.rgb565",
+  "roms": {
+    "rom_inst": {
+      "build": "make -s -C {srcdir}/fw PICTURE={picture} IMAGE={image}",
+      "dir": "{srcdir}/fw",
+      "output": "{work}/picture_rom.init"
+    }
+  }
+}

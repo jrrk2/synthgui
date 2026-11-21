@@ -1,3 +1,5 @@
+<img width="1499" height="977" alt="image" src="https://github.com/user-attachments/assets/f0badad8-57f2-4441-ab8c-5f18f1fe7586" />
+
 # synthgui -- proof of concept for an open FPGA flow GUI
 
 A Qt 6 Widgets front end for the verilator synthesis flow:
@@ -25,12 +27,14 @@ What it does today (stage one: every tool is a separate process):
 * **Pipeline**: a toolbar button per step plus *Run all*; each step runs in
   the project's work directory, streams into the Log view, is saved as
   `<work>/<step>.log`, and shows ok / FAILED and its time in the status bar.
-* **Settings** (*Settings...* in the application menu on macOS, Cmd+,; File menu elsewhere): one preference so far, per user and
-  **off by default**: whether *Run all* writes the board's non-volatile memory. A step that does (the Sonata's `program_uf2`,
-  which copies the UF2 to the SONATA drive, where the board writes it to flash; or any step with `"nonvolatile": true` in the
-  project file) is left out of *Run all* and of `--run all` unless it is on, and the status bar (or stderr) says which. Its own
-  toolbar button, and naming it (`--run program_uf2`), always run it. JTAG programming loads volatile memory and is not affected.
-  The setting is in the user's preferences (`uk.kimmitt.synthgui` on macOS); `SYNTHGUI_SETTINGS=file.ini` uses a file instead.
+* **Settings** (*Settings...* in the application menu on macOS, Cmd+,; File menu elsewhere), per user. The **Flow** tab has a tick
+  box for each step of the project: *Run all* (and `--run all`) calls the ticked ones, in the flow's order, and the status bar
+  (or stderr) says which it left out. A step's own toolbar button, and naming it (`--run program_uf2`), always run it. The choice
+  is kept by step name, so it holds for every project; a step never ticked or cleared is on, except one that writes the board's
+  non-volatile memory (the Sonata's `program_uf2`, which copies the UF2 to the SONATA drive, where the board writes it to flash; or
+  any step with `"nonvolatile": true` in the project file), which is **off until ticked**. That replaces the earlier single
+  preference `uf2/writeOnRunAll`, which is still read for a step whose box has not been touched. JTAG programming loads volatile
+  memory. The settings are in the user's preferences (`uk.kimmitt.synthgui` on macOS); `SYNTHGUI_SETTINGS=file.ini` uses a file instead.
 * **Area**: the mapper's `%Info: map:` cell counts grouped into device
   resources (LUT, FF, RAMB36, LUTRAM, DSP, IO, BUFG) with utilisation of the
   part, before placement; after placement, nextpnr's own utilisation.
@@ -208,6 +212,7 @@ stay separate executables, started as processes.
 | `pin-cells` (`tools/pin_cells/`) | gives cells of a netlist BEL attributes | `xc7/pin_cells.py` |
 | `at-gen` (`tools/at_gen/`) | generates an at-speed test block as a netlist, by path depths | `xc7/at_gen.py` |
 | `at-decode` (`tools/at_decode/`) | decodes an at-speed block's LFSR counter states to counts | `xc7/at_decode.py` |
+| `bram-init` (`tools/bram_init/`) | new block RAM contents in a routed FASM, so a memory image changes without another place and route | vortex `hw/syn/xilinx/vc707/update_bram_init.py` |
 
 Each is also a command, `build/synthgui --tool NAME args`, for scripts and for the checks: `tools/*/compare.sh` runs the
 Python original and the tool on the same inputs and compares the outputs byte for byte (every FASM, netlist and placement
@@ -218,6 +223,52 @@ from a run directory. `tools/build-standalone.sh OUTDIR [TOOL...]` builds these 
 without Qt (`CXX=...rv32g-g++` for an RV32 board, where no interpreter is acceptable). `xc7/at_sweep.py` and the other host
 console and network helpers in `xc7/` (`bios_cmd.py`, `bios_catch.py`, `sfl_upload.py`, `tftp_serve.py`) are not flow
 converters and stay Python.
+
+**Block RAMs...** in the toolbar (or `synthgui --bram-init routed.fasm`, no project needed) lists every block RAM of the
+routed FASM with its tile, width, depth and, from the `_placement.json` beside it, the cell it holds, and shows the
+selected one's contents as a hex dump. Pick rows and give them images (`.hex`/`.mem` as `$readmemh`, anything else raw
+words; `lane<NN>.hex` files by a number in the cell name; or one flat binary split into byte lanes), then Save and run the
+Bitstream step: the new `.bit` is seconds away, the placement and routing untouched. A FASM cannot tell an x36 RAMB36E1
+from two x18 RAMB18E1 in one tile; the placement settles it, and the Block cell can be edited to `36` or `18` when there is none.
+
+**ROMs tab.** Picking block RAMs one by one is for a few of them; a ROM of 600 block RAMs wants the memory, not its tiles. The
+Synthesis step writes `<top>_meminit.json` (`verilator --map-only-meminit`, in every project): each memory the mapper put in block
+RAM, with the `$readmemh` file it was initialised from, its width and depth, and for every cell the lane (data bits) and block
+(words) of the memory it holds. The ROMs tab of the Block RAMs window reads it, matches the cells against the placement, and
+lists the memories: name, size, cells placed, the file they were synthesized from. A memory without a file (a RAM) is hidden
+unless "Also the memories not read from a file" is on.
+
+- **ROM image...** sets another image for the selected ROM (`.hex`/`.mem`/`.init` as `$readmemh`, anything else raw
+  little-endian words). **Apply ROMs** gives the cells of the selected ROMs (all, when none is selected) their slice of it; the
+  Block RAMs tab shows them as "will change", **Save** writes the FASM, **Save + Bitstream** also runs the project's Bitstream
+  step. Only fasm2frames and the bitstream run again: seconds, not a place and route. A ROM written back from the file it
+  was synthesized from changes nothing, which `scripts/ci-flow.sh` checks after every place and route (the `roms` row).
+- **ROM build...** gives the ROM a shell command that builds its image from source, run in a directory of your choice,
+  with the step placeholders (`{srcdir}`, `{work}`, `{root}`, ...) and `{rom}` (its name) and `{image}` (the output file
+  below). **Output** is the file it writes. **Build ROM** runs the command of each selected ROM (its output appears below),
+  uses the output as the image and applies it. A command that fails, or that does not write its output, changes nothing.
+  ROM setups are kept in the project file, under `"roms"`:
+
+      "roms": {"rom_inst": {"build": "make -C {srcdir}/fw hex && cp {srcdir}/fw/fw.hex {image}",
+                            "dir": "{srcdir}", "output": "{work}/rom_inst.hex"}}
+
+The same from a script: `synthgui --tool bram-init --fasm routed.fasm --placement routed_placement.json --meminit top_meminit.json
+--roms` lists the memories, `--rom NAME=image` (or `--rom all`, each from its own file; `--check` only reports) writes new
+contents, `--out patched.fasm` saves them. A ROM patched this way is the same, line for line, as the FASM of a complete
+synthesis and place and route run with the new image (checked on vc707_bramtest; and the 639,495-word ROM of vc707_romlinux, 640
+block RAMs, is rewritten in under a second).
+
+**sonata_picture** (`projects/sonata_picture*`) is a worked example of that flow: the Sonata LiteX SoC and pinout of
+sonata_romlinux with a 54-byte bare-metal program in the boot ROM in place of the BIOS. It turns the LED chaser off, writes
+a 160x128 RGB565 picture (assembled in with `.incbin`) to the LCD frame buffer and selects graphics mode (word 81 of the
+LCD control window, as `sonata_lcdfb` does); then, as the ROM Linux's `photobox` does, it shows each frame of
+`/usr/share/photobox` in turn (8 s by default), read in place from the SPI flash where the rootfs partition holds them
+(`mkrom photos` finds their offsets in `rootfs.romfs`). Everything the program shows is ROM contents, so
+`make -C projects/sonata_picture-src/fw PICTURE=my.ppm INTERVAL=5` (also the project's "roms" build command) makes a new
+`gen_soc_rom.init`, and the ROMs tab (or `bram-init --rom rom_inst=...`) writes it into the routed design and makes the
+bitstream in seconds. `make test` runs the program under QEMU, with the real rootfs where the flash window is. The LCD
+controller's init and font ROMs (`lcd_init_rom.hex`, `lcd_font.hex`) must be in the project's source directory: without them the
+panel is never initialised and stays blank.
 
 The Xilinx primitive models Verilator reads as cell stubs, and that the
 mapped Verilog simulates against, are `xc7/cells_sim.v` and
@@ -303,10 +354,7 @@ carries these steps for its users in `README-Windows.txt` (`scripts/README-Windo
 
 `.github/workflows/windows-release.yml` makes the same package on GitHub's Windows runners, from source with nothing
 cached: run it from the Actions tab for a test build (the zip is the run's artifact), or push a `v*-windows` tag for a
-draft release to check and publish. It is set up for signing by [SignPath Foundation](https://signpath.org), which
-signs only builds made this way: once the project is accepted, the secret `SIGNPATH_API_TOKEN` and the variables
-`SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` and `SIGNPATH_SIGNING_POLICY_SLUG` turn it on, with
-`.signpath/artifact-configuration.xml` as the project's artifact configuration (it signs `synthgui.exe`).
+draft release to check and publish; the zip it makes is unsigned and is signed by hand afterwards.
 `RELEASE-WINDOWS.md` is the release procedure: making, checking, signing and publishing a Windows release.
 
 The GUI alone also builds with the Qt installer's kits (MSVC 2022 or MinGW) and no submodules:
@@ -335,7 +383,8 @@ runners. synthgui's own program, `bin/synthgui.exe`, is then signed by hand, as 
 (`scripts/approve-release.sh`), with a Certum Open Source Code Signing certificate issued to "Open Source Developer
 Jonathan Kimmitt"; the key is held in Certum's cloud and each signing session is opened with a one-time code. The
 tools bundled with it (verilator, nextpnr, OpenSTA, prjxray, openFPGALoader, fasm2netlist) and the MINGW64 and Qt
-libraries are other projects' builds, made from source in the same workflow, and are not signed.
+libraries are other projects' builds, made from source in the same workflow, and are not signed. A release that
+has not been signed says so in its release notes.
 
 Team roles:
 
