@@ -43,6 +43,17 @@ def glyph_mask_hex(spec):
     return "%032x" % mask, glyphs
 
 
+def set_alphabet(ser, spec):
+    """Send a '%<mask>' line so the board's alphabet is explicit, never inherited.  Harmless to
+    the fixed-alphabet build (it ignores a 33-char line).  Returns the glyph set actually used."""
+    mask, glyphs = glyph_mask_hex(spec)
+    ser.reset_input_buffer()
+    ser.write(("%" + mask + "\n").encode())
+    time.sleep(0.2)
+    print("alphabet set to '%s' (%d glyphs, mask %s)" % (spec, len(set(glyphs)), mask))
+    return glyphs
+
+
 def host_crypt():
     # libcrypt.so.1 (what gen_crypt.py validated against); the stdlib crypt module is gone in 3.13
     try:
@@ -88,11 +99,7 @@ def crack_passwd(serial, args):
     ser = serial.Serial(args.port, args.baud, timeout=args.timeout)
     time.sleep(0.2)
     if args.glyphs:
-        mask, glyphs = glyph_mask_hex(args.glyphs)
-        ser.reset_input_buffer()
-        ser.write(("%" + mask + "\n").encode())
-        time.sleep(0.2)
-        print("alphabet set to '%s' (%d glyphs, mask %s)" % (args.glyphs, len(set(glyphs)), mask))
+        set_alphabet(ser, args.glyphs)
     print("%d DES hash(es) to crack (<=6-char sweep of the chosen alphabet):" % len(entries))
     for user, h in entries:
         ser.reset_input_buffer()
@@ -151,6 +158,13 @@ def main():
 
     ser = serial.Serial(args.port, args.baud, timeout=args.timeout)
     time.sleep(0.2)
+    # Set the alphabet explicitly so a stale gmask from an earlier run can't leak in.  The words
+    # here are lowercase, so sweeping anything wider than 'lower' only makes every search slower
+    # (62^n vs 26^n) and risks exceeding --timeout -- warn if asked to.
+    if args.glyphs and set(GLYPH_CLASSES.get(args.glyphs, args.glyphs)) - set(_string.ascii_lowercase):
+        print("warning: --glyphs %s is wider than lowercase; dictionary words will take far "
+              "longer and may exceed --timeout %.0fs" % (args.glyphs, args.timeout))
+    set_alphabet(ser, args.glyphs or "lower")
 
     ok = bad = 0
     t0 = time.time()
