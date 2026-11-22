@@ -92,8 +92,9 @@ inline const std::vector<OptionSpec>& optionSpecs() {
          "After the timing-driven passes, move logic across flip-flops from the late side to the side with "
          "time in hand, forward (a LUT reading only flip-flops of one clock, enable and reset goes in front "
          "of them) or backward (a late flip-flop goes behind the LUT that drives it); each round is kept "
-         "only if the analysis of the result is better.  Retimed flip-flops are named _fret / _bret and no "
-         "longer pair by name with the source's registers.  Needs timing analysis on.", "", 0, 32},
+         "only if the analysis of the result is better.  Retiming aims at the timing margin, not just the "
+         "period, so a larger margin moves more.  Retimed flip-flops are named _fret / _bret and no "
+         "longer pair by name with the source's registers.  Needs timing analysis on.", "", 0, 1000},
         {"synth.timing_margin", "Timing margin (ns)", OptionSpec::Real, "1", "--map-only-timing-margin {}", true,
          "How much the timing-driven passes aim to beat the constraints by, leaving room for routing; "
          "a fifth of the period when not set.", "", 0, 100},

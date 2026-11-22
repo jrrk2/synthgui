@@ -1,0 +1,34 @@
+// Stand-ins for simulation: the IBUFDS passes I, the MMCM passes CLKIN1 through as CLKOUT0
+// (the design is timed in clock cycles, so its frequency does not matter) and locks.
+module IBUFDS #(parameter CAPACITANCE = "", DIFF_TERM = "", DQS_BIAS = "", IBUF_DELAY_VALUE = 0,
+                IBUF_LOW_PWR = "", IFD_DELAY_VALUE = "", IOSTANDARD = "")
+    (output O, input I, input IB);
+    assign O = I;
+endmodule
+module MMCME2_ADV #(parameter CLKIN_FREQ_MAX = "", CLKIN_FREQ_MIN = "", CLKPFD_FREQ_MAX = "",
+    CLKPFD_FREQ_MIN = "", VCOCLK_FREQ_MAX = "", VCOCLK_FREQ_MIN = "", BANDWIDTH = "",
+    CLKFBOUT_MULT_F = 5.0, CLKFBOUT_PHASE = 0.0, CLKFBOUT_USE_FINE_PS = "", CLKIN1_PERIOD = 0.0,
+    CLKIN2_PERIOD = 0.0, CLKOUT0_DIVIDE_F = 1.0, CLKOUT0_DUTY_CYCLE = 0.5, CLKOUT0_PHASE = 0.0,
+    CLKOUT0_USE_FINE_PS = "", CLKOUT1_DIVIDE = 1, CLKOUT1_DUTY_CYCLE = 0.5, CLKOUT1_PHASE = 0.0,
+    CLKOUT1_USE_FINE_PS = "", CLKOUT2_DIVIDE = 1, CLKOUT2_DUTY_CYCLE = 0.5, CLKOUT2_PHASE = 0.0,
+    CLKOUT2_USE_FINE_PS = "", CLKOUT3_DIVIDE = 1, CLKOUT3_DUTY_CYCLE = 0.5, CLKOUT3_PHASE = 0.0,
+    CLKOUT3_USE_FINE_PS = "", CLKOUT4_CASCADE = "", CLKOUT4_DIVIDE = 1, CLKOUT4_DUTY_CYCLE = 0.5,
+    CLKOUT4_PHASE = 0.0, CLKOUT4_USE_FINE_PS = "", CLKOUT5_DIVIDE = 1, CLKOUT5_DUTY_CYCLE = 0.5,
+    CLKOUT5_PHASE = 0.0, CLKOUT5_USE_FINE_PS = "", CLKOUT6_DIVIDE = 1, CLKOUT6_DUTY_CYCLE = 0.5,
+    CLKOUT6_PHASE = 0.0, CLKOUT6_USE_FINE_PS = "", COMPENSATION = "", DIVCLK_DIVIDE = 1,
+    IS_CLKINSEL_INVERTED = 0, IS_PSEN_INVERTED = 0, IS_PSINCDEC_INVERTED = 0, IS_PWRDWN_INVERTED = 0,
+    IS_RST_INVERTED = 0, REF_JITTER1 = 0.0, REF_JITTER2 = 0.0, SS_EN = "", SS_MODE = "",
+    SS_MOD_PERIOD = 0, STARTUP_WAIT = "")
+   (output CLKFBOUT, CLKFBOUTB, CLKFBSTOPPED, CLKINSTOPPED, CLKOUT0, CLKOUT0B, CLKOUT1, CLKOUT1B,
+    output CLKOUT2, CLKOUT2B, CLKOUT3, CLKOUT3B, CLKOUT4, CLKOUT5, CLKOUT6,
+    output [15:0] DO, output DRDY, output reg LOCKED = 1'b0, output PSDONE,
+    input CLKFBIN, CLKIN1, CLKIN2, CLKINSEL, input [6:0] DADDR, input DCLK, DEN, input [15:0] DI,
+    input DWE, PSCLK, PSEN, PSINCDEC, PWRDWN, RST);
+    assign CLKOUT0 = CLKIN1;
+    assign CLKFBOUT = CLKIN1;
+    reg [3:0] n = 4'd0;
+    always @(posedge CLKIN1) begin
+        if (n != 4'd15) n <= n + 4'd1;
+        LOCKED <= n == 4'd15;
+    end
+endmodule
